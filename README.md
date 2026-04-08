@@ -130,13 +130,6 @@ pixi run -e default sim --config level1.toml --controller my_controller.py --n_r
 
 The controller file is loaded from `ece484_fly/control/`. You can also set the controller in `level1.toml` under `[controller] file`.
 
-### macOS Viewer Tips
-
-Use the view-oriented config for smoother interactive rendering:
-
-```bash
-pixi run -e default sim --config level1_view.toml --n_runs 1 --pause_on_finish=True
-```
 
 Notes:
 - `--pause_on_finish=True` keeps the MuJoCo viewer open and interactive until you press `Ctrl+C`.
