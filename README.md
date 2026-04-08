@@ -19,7 +19,9 @@ The drone must navigate through a series of gates while avoiding obstacles. The 
 
 ## Setup
 
-**Prerequisites**: Linux (Ubuntu recommended), Python 3.11+
+**Prerequisites**:
+- **Simulation**: Linux (Ubuntu recommended) or macOS (Apple Silicon), Python 3.11+
+- **Hardware deployment**: Linux (Ubuntu recommended), Python 3.11+
 
 1. Clone the repository:
    ```
@@ -32,8 +34,10 @@ The drone must navigate through a series of gates while avoiding obstacles. The 
    ```
 3. Activate the simulation environment:
    ```
-   pixi shell
+   pixi install -e default
    ```
+
+> **macOS note**: Simulation is supported on macOS via CPU execution. GPU acceleration and hardware deployment workflows are Linux-only.
 
 ## Project Structure
 
@@ -121,11 +125,22 @@ The track configuration is defined in `config/level1.toml`. Key settings:
 Activate the environment and run your controller:
 
 ```bash
-pixi shell
-python3 scripts/sim.py --config level1.toml --controller my_controller.py
+pixi run -e default sim --config level1.toml --controller my_controller.py --n_runs 1
 ```
 
 The controller file is loaded from `ece484_fly/control/`. You can also set the controller in `level1.toml` under `[controller] file`.
+
+### macOS Viewer Tips
+
+Use the view-oriented config for smoother interactive rendering:
+
+```bash
+pixi run -e default sim --config level1_view.toml --n_runs 1 --pause_on_finish=True
+```
+
+Notes:
+- `--pause_on_finish=True` keeps the MuJoCo viewer open and interactive until you press `Ctrl+C`.
+- If you pass booleans via CLI, use `True`/`False` (capitalized) to avoid type parsing issues.
 
 ## Hardware Deployment
 

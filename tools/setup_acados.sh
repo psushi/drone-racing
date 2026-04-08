@@ -13,6 +13,13 @@ if [ ! -f ${PIXI_PROJECT_ROOT}/pixi.lock ]; then
   exit 0
 fi
 
+OS="$(uname -s)"
+if [ "${OS}" = "Darwin" ]; then
+  # Simulation can run on macOS without acados; skip Linux-specific setup here.
+  echo "[Setup Acados] macOS detected; skipping acados auto-setup."
+  exit 0
+fi
+
 ACADOS_DIR="${PIXI_PROJECT_ROOT}/acados"
 
 # Clone and build acados

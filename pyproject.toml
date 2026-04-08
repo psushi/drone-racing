@@ -37,7 +37,7 @@ sim = [
     "warp-lang",
 ]
 # option[gpu]: simulation with gpu
-gpu = ["jax[cuda12]"]
+gpu = ["jax[cuda12] ; sys_platform == 'linux'"]
 # option[deploy]: deploy to real drones
 deploy = [
     "cfclient",
@@ -59,7 +59,7 @@ ece484_fly = ["envs/assets/*.xml", "envs/assets/*.png"]
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["linux-64"]
+platforms = ["linux-64", "osx-arm64"]
 
 [tool.pixi.pypi-dependencies]
 ece484_fly = { path = ".", editable = true }
@@ -95,6 +95,10 @@ default = { features = ["sim"], solve-group = "default" }
 deploy = { features = ["sim", "gpu", "kilted", "deploy"] }
 gpu = { features = ["sim", "gpu"], solve-group = "default" }
 
+[tool.pixi.tasks]
+sim = ".pixi/envs/default/bin/python scripts/sim.py"
+deploy = ".pixi/envs/deploy/bin/python scripts/deploy.py"
+
 [tool.pixi.dependencies]
 openblas = ">=0.3.30,<0.4"
 python = ">=3.11.12,<3.14"
@@ -103,3 +107,4 @@ packaging = ">=25.0,<26"
 cmake = "*"
 compilers = ">=1.9.0, <1.11.0"
 make = "*"
+fire = "*"

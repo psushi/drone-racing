@@ -10,6 +10,7 @@ Look for instructions in `README.md` and in the official documentation.
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -36,6 +37,7 @@ def simulate(
     controller: str | None = None,
     n_runs: int = 1,
     render: bool | None = None,
+    pause_on_finish: bool = False,
 ) -> list[float]:
     """Evaluate the drone controller over multiple episodes.
 
@@ -45,6 +47,7 @@ def simulate(
             the controller specified in the config file is used.
         n_runs: The number of episodes.
         render: Enable/disable rendering the simulation.
+        pause_on_finish: If true, wait for Enter before closing the viewer after all runs finish.
 
     Returns:
         A list of episode times.
@@ -109,6 +112,14 @@ def simulate(
         ep_times.append(curr_time if obs["target_gate"] == -1 else None)
 
     # Close the environment
+    if config.sim.render and pause_on_finish:
+        logger.info("Simulation finished. Keeping viewer open; press Ctrl+C to close.")
+        try:
+            while True:
+                env.render()
+                time.sleep(1 / 60)
+        except KeyboardInterrupt:
+            pass
     env.close()
     return ep_times
 
