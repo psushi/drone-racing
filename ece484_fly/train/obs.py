@@ -97,3 +97,80 @@ def flatten_obs(observations: dict, vectorized: bool) -> np.ndarray:
 
     out =  np.concatenate([rel_gate_pos_b, gate_normal_b, nearest_obs_b, vel_b,ang_vel_b,gravity, progress],axis=-1)
     return out if vectorized else out[0]
+
+
+def _quat_conjugate_jax(quat: jax.Array) -> jax.Array:
+    xyz = -quat[..., :3]
+    w = quat[..., 3:]
+    return jnp.concatenate([xyz, w], axis=-1)
+
+
+def _quat_apply_jax(quat: jax.Array, vec: jax.Array) -> jax.Array:
+    q_xyz = quat[..., :3]
+    q_w = quat[..., 3:4]
+    uv = jnp.cross(q_xyz, vec)
+    uuv = jnp.cross(q_xyz, uv)
+    return vec + 2.0 * (q_w * uv + uuv)
+
+
+def k_nearest_obstacles_jax(obstacle_pos: jax.Array, pos: jax.Array, k: int) -> jax.Array:
+    """Find the k nearest obstacles to the drone in JAX."""
+    n_obstacles = obstacle_pos.shape[1]
+    dist = jnp.linalg.norm(obstacle_pos - pos[:, None, :], axis=-1)
+    sorted_idx = jnp.argsort(dist, axis=-1)
+    k_eff = min(k, n_obstacles)
+    nearest = jnp.take_along_axis(
+        obstacle_pos,
+        sorted_idx[:, :k_eff, None],
+        axis=1,
+    )
+    if k_eff < k:
+        pad = jnp.zeros((obstacle_pos.shape[0], k - k_eff, 3), dtype=nearest.dtype)
+        nearest = jnp.concatenate([nearest, pad], axis=1)
+    return nearest
+
+
+def flatten_obs_jax(observations: dict[str, jax.Array], vectorized: bool) -> jax.Array:
+    """JAX-native version of ``flatten_obs`` suitable for JIT/scans."""
+    if not vectorized:
+        observations = {
+            key: (value[None, ...] if key != "target_gate" else value[None])
+            for key, value in observations.items()
+        }
+
+    K = 2
+    batch_idx = jnp.arange(observations["pos"].shape[0])
+    pos = jnp.asarray(observations["pos"], dtype=jnp.float32)
+    body_quat = jnp.asarray(observations["quat"], dtype=jnp.float32)
+    r_bw = _quat_conjugate_jax(body_quat)
+    target_gates = jnp.asarray(observations["target_gate"], dtype=jnp.int32)
+
+    gate_pos = observations["gates_pos"][batch_idx, target_gates]
+    rel_gate_pos_w = gate_pos - pos
+    rel_gate_pos_b = _quat_apply_jax(r_bw, rel_gate_pos_w)
+
+    nearest_obs_w = k_nearest_obstacles_jax(jnp.asarray(observations["obstacles_pos"], dtype=jnp.float32), pos, k=K)
+    nearest_obs_rel_w = nearest_obs_w - pos[:, None, :]
+    nearest_obs_b = _quat_apply_jax(
+        jnp.repeat(r_bw[:, None, :], K, axis=1),
+        nearest_obs_rel_w,
+    ).reshape(pos.shape[0], -1)
+
+    vel_b = _quat_apply_jax(r_bw, jnp.asarray(observations["vel"], dtype=jnp.float32))
+    ang_vel_b = _quat_apply_jax(r_bw, jnp.asarray(observations["ang_vel"], dtype=jnp.float32))
+
+    gate_quat = jnp.asarray(observations["gates_quat"], dtype=jnp.float32)[batch_idx, target_gates]
+    gate_normal_w = _quat_apply_jax(gate_quat, jnp.tile(jnp.array([[1.0, 0.0, 0.0]], dtype=jnp.float32), (pos.shape[0], 1)))
+    gate_normal_b = _quat_apply_jax(r_bw, gate_normal_w)
+
+    gravity_world = jnp.tile(jnp.array([[0.0, 0.0, -1.0]], dtype=jnp.float32), (pos.shape[0], 1))
+    gravity_b = _quat_apply_jax(r_bw, gravity_world)
+
+    gates_visited = jnp.asarray(observations["gates_visited"], dtype=jnp.float32)
+    progress = jnp.sum(gates_visited, axis=-1, keepdims=True) / gates_visited.shape[-1]
+
+    out = jnp.concatenate(
+        [rel_gate_pos_b, gate_normal_b, nearest_obs_b, vel_b, ang_vel_b, gravity_b, progress],
+        axis=-1,
+    )
+    return out if vectorized else out[0]

@@ -4312,7 +4312,7 @@ packages:
 - pypi: ./
   name: ece484-fly
   version: 0.0.1
-  sha256: e7e3dc89b13dcc26b3b66c28828463d45afc893df8e5dff9759b5db3557c21e1
+  sha256: 512e3bdd87d0af7aff0b1efc135add3e636ed28f57ceffe924b04f846821b165
   requires_dist:
   - fire>=0.6.0
   - numpy

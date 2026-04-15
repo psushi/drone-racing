@@ -1,6 +1,7 @@
 from typing import NamedTuple
 import numpy as np
 import jax.numpy as jnp
+import jax
 class Transition(NamedTuple):
     """Transition data for the actor critic model."""
     obs: np.ndarray
@@ -30,6 +31,35 @@ def compute_gae(
         gae = delta + gamma * lambda_ * not_done * gae
         advantages[t] = gae
 
+    returns = advantages + values
+    return advantages, returns
+
+
+def compute_gae_jax(
+    values: jax.Array,
+    rewards: jax.Array,
+    dones: jax.Array,
+    gamma: float,
+    lambda_: float,
+    last_value: jax.Array,
+) -> tuple[jax.Array, jax.Array]:
+    """JAX-native GAE over a [T, N] rollout."""
+
+    def scan_step(carry, inputs):
+        next_gae, next_value = carry
+        value_t, reward_t, done_t = inputs
+        not_done = 1.0 - done_t.astype(jnp.float32)
+        delta = reward_t + gamma * next_value * not_done - value_t
+        gae = delta + gamma * lambda_ * not_done * next_gae
+        return (gae, value_t), gae
+
+    init_carry = (jnp.zeros_like(last_value), last_value)
+    (_, _), advantages_rev = jax.lax.scan(
+        scan_step,
+        init_carry,
+        (values[::-1], rewards[::-1], dones[::-1]),
+    )
+    advantages = advantages_rev[::-1]
     returns = advantages + values
     return advantages, returns
 
@@ -65,4 +95,3 @@ def ppo_loss(
     total_loss = actor_loss + vf_coef *  value_loss - ent_coef * entropy
 
     return total_loss, (actor_loss, value_loss, entropy)
-
