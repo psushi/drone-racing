@@ -33,6 +33,7 @@ class RolloutBatch(NamedTuple):
     value: jax.Array
     reward: jax.Array
     done: jax.Array
+    passed: jax.Array
 
 
 class RunnerState(NamedTuple):
@@ -147,7 +148,7 @@ def make_collect_rollout_fn(
             log_prob = pi.log_prob(raw_action)
             action = scale_actions_jax(raw_action, action_low, action_high)
 
-            env_state, next_obs_dict, reward, terminated, truncated, _ = env.step_fn(env_state, action)
+            env_state, next_obs_dict, reward, terminated, truncated, info = env.step_fn(env_state, action)
             done = jnp.logical_or(terminated, truncated)
             next_obs = flatten_obs_jax(next_obs_dict, vectorized=True)
 
@@ -158,6 +159,7 @@ def make_collect_rollout_fn(
                 value=value,
                 reward=reward,
                 done=done,
+                passed=info["passed"],
             )
             next_carry = RunnerState(train_state, env_state, next_obs, rng)
             return next_carry, transition
@@ -300,7 +302,7 @@ def run_train(
                     "mean_reward": float(rewards.mean()),
                     "running_mean_reward": total_reward_sum / total_reward_count,
                     "done_rate": float(dones.mean()),
-                    "avg_gates_passed": float(jax.device_get(runner_state.env_state.env_data.gates_visited[:, 0].sum(axis=-1).mean())),
+                    "avg_gates_passed": float(jax.device_get(rollout.passed.sum(axis=0).mean())),
                     "actor_loss": float(epoch_metrics["actor_loss"][-1]),
                     "value_loss": float(epoch_metrics["value_loss"][-1]),
                     "entropy": float(epoch_metrics["entropy"][-1]),

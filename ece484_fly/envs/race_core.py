@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
 import jax
-import jax.numpy as jp
+import jax.numpy as jnp
 import mujoco
 import numpy as np
 from crazyflow.sim import Sim
@@ -122,21 +122,21 @@ class EnvData:
     ) -> EnvData:
         """Create a new environment data struct with default values."""
         return cls(
-            target_gate=jp.zeros((n_envs, n_drones), dtype=int, device=device),
-            gates_visited=jp.zeros((n_envs, n_drones, n_gates), dtype=bool, device=device),
-            obstacles_visited=jp.zeros((n_envs, n_drones, n_obstacles), dtype=bool, device=device),
-            last_drone_pos=jp.zeros((n_envs, n_drones, 3), dtype=np.float32, device=device),
-            marked_for_reset=jp.zeros(n_envs, dtype=bool, device=device),
-            disabled_drones=jp.zeros((n_envs, n_drones), dtype=bool, device=device),
-            contact_masks=jp.array(contact_masks, dtype=bool, device=device),
-            steps=jp.zeros(n_envs, dtype=int, device=device),
-            pos_limit_low=jp.array(pos_limit_low, dtype=np.float32, device=device),
-            pos_limit_high=jp.array(pos_limit_high, dtype=np.float32, device=device),
-            gate_mj_ids=jp.array(gate_mj_ids, dtype=int, device=device),
-            obstacle_mj_ids=jp.array(obstacle_mj_ids, dtype=int, device=device),
-            max_episode_steps=jp.array([max_episode_steps], dtype=int, device=device),
-            sensor_range=jp.array([sensor_range], dtype=jp.float32, device=device),
-            rewards=jp.zeros((n_envs, n_drones), dtype=jp.float32, device=device),
+            target_gate=jnp.zeros((n_envs, n_drones), dtype=int, device=device),
+            gates_visited=jnp.zeros((n_envs, n_drones, n_gates), dtype=bool, device=device),
+            obstacles_visited=jnp.zeros((n_envs, n_drones, n_obstacles), dtype=bool, device=device),
+            last_drone_pos=jnp.zeros((n_envs, n_drones, 3), dtype=np.float32, device=device),
+            marked_for_reset=jnp.zeros(n_envs, dtype=bool, device=device),
+            disabled_drones=jnp.zeros((n_envs, n_drones), dtype=bool, device=device),
+            contact_masks=jnp.array(contact_masks, dtype=bool, device=device),
+            steps=jnp.zeros(n_envs, dtype=int, device=device),
+            pos_limit_low=jnp.array(pos_limit_low, dtype=np.float32, device=device),
+            pos_limit_high=jnp.array(pos_limit_high, dtype=np.float32, device=device),
+            gate_mj_ids=jnp.array(gate_mj_ids, dtype=int, device=device),
+            obstacle_mj_ids=jnp.array(obstacle_mj_ids, dtype=int, device=device),
+            max_episode_steps=jnp.array([max_episode_steps], dtype=int, device=device),
+            sensor_range=jnp.array([sensor_range], dtype=jnp.float32, device=device),
+            rewards=jnp.zeros((n_envs, n_drones), dtype=jnp.float32, device=device),
         )
 
 
@@ -358,14 +358,17 @@ class RaceCoreEnv:
         self.gates, self.obstacles, self.drone = load_track(track)
         # Randomize the track
         self.sim.data = self.sim.data.replace(core=self.sim.data.core.replace(rng_key=key))
-        reset_pos = self._sample_reset_positions(subkey)
+        reset_pos, reset_quat = self._sample_reset_state(subkey)
 
         @jax.jit
         def update_sim_data(
             data: SimData, mjx_data: Data, key: jax.random.PRNGKey
         ) -> tuple[SimData, Data]:
             pos = data.states.pos.at[...].set(reset_pos)
-            data = data.replace(states=data.states.replace(pos=pos))
+            quat = data.states.quat.at[...].set(reset_quat)
+            vel = data.states.vel.at[...].set(0.0)
+            ang_vel = data.states.ang_vel.at[...].set(0.0)
+            data = data.replace(states=data.states.replace(pos=pos, quat=quat, vel=vel, ang_vel=ang_vel))
 
             mjx_data = self.randomize_track(
                 mjx_data,
@@ -386,27 +389,35 @@ class RaceCoreEnv:
 
         return self.obs(), self.info()
 
-    def _sample_reset_positions(self, key: jax.random.PRNGKey) -> Array:
-        """Sample reset positions near the first target gate."""
+    def _sample_reset_state(self, key: jax.random.PRNGKey) -> tuple[Array, Array]:
+        """Sample a stable hover-like reset state facing the first target gate."""
         gate_pos = np.asarray(self.gates["pos"][0], dtype=np.float32)
-        gate_rot = R.from_quat(np.asarray(self.gates["quat"][0], dtype=np.float32))
+        gate_quat = np.asarray(self.gates["quat"][0], dtype=np.float32)
+        gate_rot = R.from_quat(gate_quat)
         gate_forward = gate_rot.apply(np.array([1.0, 0.0, 0.0], dtype=np.float32))
         gate_lateral = gate_rot.apply(np.array([0.0, 1.0, 0.0], dtype=np.float32))
 
-        near_gate_center = gate_pos - 0.6 * gate_forward + 0.05 * np.array([0.0, 0.0, 1.0], dtype=np.float32)
-        near_gate_center = near_gate_center.reshape((1, 1, 3))
+        hover_center = gate_pos - 1.25 * gate_forward + 0.25 * np.array([0.0, 0.0, 1.0], dtype=np.float32)
+        hover_center = hover_center.reshape((1, 1, 3))
 
         keys = jax.random.split(key, 3)
-        along_track = jax.random.uniform(keys[0], (self.sim.n_worlds, 1, 1), minval=-0.15, maxval=0.15)
-        lateral = jax.random.uniform(keys[1], (self.sim.n_worlds, 1, 1), minval=-0.20, maxval=0.20)
-        vertical = jax.random.uniform(keys[2], (self.sim.n_worlds, 1, 1), minval=-0.10, maxval=0.10)
-        near_gate_pos = (
-            near_gate_center
+        along_track = jax.random.uniform(keys[0], (self.sim.n_worlds, 1, 1), minval=-0.20, maxval=0.20)
+        lateral = jax.random.uniform(keys[1], (self.sim.n_worlds, 1, 1), minval=-0.15, maxval=0.15)
+        vertical = jax.random.uniform(keys[2], (self.sim.n_worlds, 1, 1), minval=-0.05, maxval=0.05)
+        hover_pos = (
+            hover_center
             - along_track * gate_forward.reshape((1, 1, 3))
             + lateral * gate_lateral.reshape((1, 1, 3))
             + vertical * np.array([0.0, 0.0, 1.0], dtype=np.float32).reshape((1, 1, 3))
         )
-        return near_gate_pos
+        hover_quat = jax.device_put(
+            jnp.broadcast_to(
+                jnp.asarray(gate_quat, dtype=jnp.float32).reshape((1, 1, 4)),
+                (self.sim.n_worlds, self.sim.n_drones, 4),
+            ),
+            self.device,
+        )
+        return hover_pos, hover_quat
 
     def _step(self, action: Array) -> tuple[dict[str, Array], float, bool, bool, dict]:
         """Step the firmware_wrapper class and its environment.
@@ -463,9 +474,9 @@ class RaceCoreEnv:
         base_action_space = (
             self.single_action_space if hasattr(self, "single_action_space") else self.action_space
         )
-        action_low = jp.asarray(base_action_space.low, dtype=jp.float32).reshape((1, 1, -1))
-        action_high = jp.asarray(base_action_space.high, dtype=jp.float32).reshape((1, 1, -1))
-        action = jp.asarray(action, dtype=jp.float32).reshape((self.sim.n_worlds, self.sim.n_drones, -1))
+        action_low = jnp.asarray(base_action_space.low, dtype=jnp.float32).reshape((1, 1, -1))
+        action_high = jnp.asarray(base_action_space.high, dtype=jnp.float32).reshape((1, 1, -1))
+        action = jnp.asarray(action, dtype=jnp.float32).reshape((self.sim.n_worlds, self.sim.n_drones, -1))
         return 2.0 * (action - action_low) / (action_high - action_low) - 1.0
 
     def apply_action(self, action: Array):
@@ -572,21 +583,21 @@ class RaceCoreEnv:
         data: EnvData, drone_pos: Array, mocap_pos: Array, mask: Array | None = None
     ) -> EnvData:
         """Reset auxiliary variables of the environment data."""
-        mask = jp.ones(data.steps.shape, dtype=bool) if mask is None else mask
-        target_gate = jp.where(mask[..., None], 0, data.target_gate)
-        last_drone_pos = jp.where(mask[..., None, None], drone_pos, data.last_drone_pos)
-        disabled_drones = jp.where(mask[..., None], False, data.disabled_drones)
-        steps = jp.where(mask, 0, data.steps)
+        mask = jnp.ones(data.steps.shape, dtype=bool) if mask is None else mask
+        target_gate = jnp.where(mask[..., None], 0, data.target_gate)
+        last_drone_pos = jnp.where(mask[..., None, None], drone_pos, data.last_drone_pos)
+        disabled_drones = jnp.where(mask[..., None], False, data.disabled_drones)
+        steps = jnp.where(mask, 0, data.steps)
         # Check which gates are in range of the drone
         gates_pos = mocap_pos[:, data.gate_mj_ids]
         dpos = drone_pos[..., None, :2] - gates_pos[:, None, :, :2]
-        gates_visited = jp.linalg.norm(dpos, axis=-1) < data.sensor_range
-        gates_visited = jp.where(mask[..., None, None], gates_visited, data.gates_visited)
+        gates_visited = jnp.linalg.norm(dpos, axis=-1) < data.sensor_range
+        gates_visited = jnp.where(mask[..., None, None], gates_visited, data.gates_visited)
         # And which obstacles are in range
         obstacles_pos = mocap_pos[:, data.obstacle_mj_ids]
         dpos = drone_pos[..., None, :2] - obstacles_pos[:, None, :, :2]
-        obstacles_visited = jp.linalg.norm(dpos, axis=-1) < data.sensor_range
-        obstacles_visited = jp.where(
+        obstacles_visited = jnp.linalg.norm(dpos, axis=-1) < data.sensor_range
+        obstacles_visited = jnp.where(
             mask[..., None, None], obstacles_visited, data.obstacles_visited
         )
         return data.replace(
@@ -595,9 +606,9 @@ class RaceCoreEnv:
             disabled_drones=disabled_drones,
             gates_visited=gates_visited,
             obstacles_visited=obstacles_visited,
-            rewards=jp.where(mask[..., None], 0.0, data.rewards),
+            rewards=jnp.where(mask[..., None], 0.0, data.rewards),
             steps=steps,
-            marked_for_reset=jp.where(mask, 0, data.marked_for_reset),  # Unmark after env reset
+            marked_for_reset=jnp.where(mask, 0, data.marked_for_reset),  # Unmark after env reset
         )
 
     @staticmethod
@@ -605,8 +616,8 @@ class RaceCoreEnv:
         """Rotate a world-space vector by a quaternion in [x, y, z, w] order."""
         q_xyz = quat[..., :3]
         q_w = quat[..., 3:4]
-        uv = jp.cross(q_xyz, vec)
-        uuv = jp.cross(q_xyz, uv)
+        uv = jnp.cross(q_xyz, vec)
+        uuv = jnp.cross(q_xyz, uv)
         return vec + 2.0 * (q_w * uv + uuv)
 
     @staticmethod
@@ -630,18 +641,20 @@ class RaceCoreEnv:
 
         gate_forward = RaceCoreEnv._quat_apply(
             gate_quat,
-            jp.broadcast_to(jp.array([1.0, 0.0, 0.0], dtype=jp.float32), gate_pos.shape),
+            jnp.broadcast_to(jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32), gate_pos.shape),
         )
-        prev_gate_progress = jp.sum((last_drone_pos - gate_pos) * gate_forward, axis=-1)
-        curr_gate_progress = jp.sum((drone_pos - gate_pos) * gate_forward, axis=-1)
-        progress_reward = progress_reward_scale * (prev_gate_progress - curr_gate_progress)
-        progress_reward = jp.where(passed | disabled_drones, 0.0, progress_reward)
+        prev_gate_progress = jnp.sum((last_drone_pos - gate_pos) * gate_forward, axis=-1)
+        curr_gate_progress = jnp.sum((drone_pos - gate_pos) * gate_forward, axis=-1)
+        # Reward progress toward increasing signed gate-plane position, i.e. moving from the
+        # approach side through the gate plane instead of farther away behind it.
+        progress_reward = progress_reward_scale * (curr_gate_progress - prev_gate_progress)
+        progress_reward = jnp.where(passed | disabled_drones, 0.0, progress_reward)
         newly_disabled = disabled_drones & ~prev_disabled_drones
-        control_penalty = control_penalty_scale * jp.mean(normalized_action[..., 1:] ** 2, axis=-1)
+        control_penalty = control_penalty_scale * jnp.mean(normalized_action[..., 1:] ** 2, axis=-1)
         return (
             progress_reward
-            + gate_pass_bonus * passed.astype(jp.float32)
-            - crash_penalty * newly_disabled.astype(jp.float32)
+            + gate_pass_bonus * passed.astype(jnp.float32)
+            - crash_penalty * newly_disabled.astype(jnp.float32)
             - step_penalty
             - control_penalty
         )
@@ -677,8 +690,8 @@ class RaceCoreEnv:
         # Extract the gate poses of the current target gates and check if the drones have passed
         # them between the last and current position
         gate_ids = data.gate_mj_ids[data.target_gate % n_gates]
-        gate_pos = gates_pos[jp.arange(gates_pos.shape[0])[:, None], gate_ids]
-        gate_quat = gates_quat[jp.arange(gates_quat.shape[0])[:, None], gate_ids]
+        gate_pos = gates_pos[jnp.arange(gates_pos.shape[0])[:, None], gate_ids]
+        gate_quat = gates_quat[jnp.arange(gates_quat.shape[0])[:, None], gate_ids]
         passed = gate_passed(drone_pos, data.last_drone_pos, gate_pos, gate_quat, (0.45, 0.45))
         rewards = RaceCoreEnv._compute_reward(
             data.last_drone_pos,
@@ -692,16 +705,16 @@ class RaceCoreEnv:
         )
         # Update the target gate index. Increment by one if drones have passed a gate
         target_gate = data.target_gate + passed * ~disabled_drones
-        target_gate = jp.where(target_gate >= n_gates, -1, target_gate)
+        target_gate = jnp.where(target_gate >= n_gates, -1, target_gate)
         steps = data.steps + 1
         truncated = steps >= data.max_episode_steps
-        marked_for_reset = jp.all(disabled_drones | truncated[..., None], axis=-1)
+        marked_for_reset = jnp.all(disabled_drones | truncated[..., None], axis=-1)
         # Update which gates and obstacles are or have been in range of the drone
         sensor_range = data.sensor_range
         dpos = drone_pos[..., None, :2] - gates_pos[:, None, :, :2]
-        gates_visited = data.gates_visited | (jp.linalg.norm(dpos, axis=-1) < sensor_range)
+        gates_visited = data.gates_visited | (jnp.linalg.norm(dpos, axis=-1) < sensor_range)
         dpos = drone_pos[..., None, :2] - obstacles_pos[:, None, :, :2]
-        obstacles_visited = data.obstacles_visited | (jp.linalg.norm(dpos, axis=-1) < sensor_range)
+        obstacles_visited = data.obstacles_visited | (jnp.linalg.norm(dpos, axis=-1) < sensor_range)
         data = data.replace(
             last_drone_pos=drone_pos,
             target_gate=target_gate,
@@ -730,16 +743,16 @@ class RaceCoreEnv:
         """Get the nominal or real gate positions and orientations depending on the sensor range."""
         mask, real_pos = gates_visited[..., None], mocap_pos[:, gate_mocap_ids]
         real_quat = mocap_quat[:, gate_mocap_ids][..., [1, 2, 3, 0]]
-        gates_pos = jp.where(mask, real_pos[:, None], nominal_gate_pos[None, None])
-        gates_quat = jp.where(mask, real_quat[:, None], nominal_gate_quat[None, None])
+        gates_pos = jnp.where(mask, real_pos[:, None], nominal_gate_pos[None, None])
+        gates_quat = jnp.where(mask, real_quat[:, None], nominal_gate_quat[None, None])
         mask, real_pos = obstacles_visited[..., None], mocap_pos[:, obstacle_mocap_ids]
-        obstacles_pos = jp.where(mask, real_pos[:, None], nominal_obstacle_pos[None, None])
+        obstacles_pos = jnp.where(mask, real_pos[:, None], nominal_obstacle_pos[None, None])
         return gates_pos, gates_quat, obstacles_pos
 
     @staticmethod
     @partial(jax.jit, static_argnames="n_drones")
     def _truncated(steps: Array, max_episode_steps: Array, n_drones: int) -> Array:
-        return jp.tile((steps >= max_episode_steps)[..., None], (1, n_drones))
+        return jnp.tile((steps >= max_episode_steps)[..., None], (1, n_drones))
 
     @staticmethod
     def _sanitize_drone_obs(
@@ -750,21 +763,21 @@ class RaceCoreEnv:
         disabled: Array,
     ) -> tuple[Array, Array, Array, Array]:
         invalid = disabled | RaceCoreEnv._invalid_drone_state(pos, quat, vel, ang_vel)
-        safe_quat = jp.array([0.0, 0.0, 0.0, 1.0], dtype=jp.float32)
-        pos = jp.where(invalid[..., None], 0.0, pos)
-        quat = jp.where(invalid[..., None], safe_quat, quat)
-        vel = jp.where(invalid[..., None], 0.0, vel)
-        ang_vel = jp.where(invalid[..., None], 0.0, ang_vel)
+        safe_quat = jnp.array([0.0, 0.0, 0.0, 1.0], dtype=jnp.float32)
+        pos = jnp.where(invalid[..., None], 0.0, pos)
+        quat = jnp.where(invalid[..., None], safe_quat, quat)
+        vel = jnp.where(invalid[..., None], 0.0, vel)
+        ang_vel = jnp.where(invalid[..., None], 0.0, ang_vel)
         return pos, quat, vel, ang_vel
 
     @staticmethod
     def _invalid_drone_state(pos: Array, quat: Array, vel: Array, ang_vel: Array) -> Array:
-        quat_norm = jp.linalg.norm(quat, axis=-1)
-        pos_finite = jp.all(jp.isfinite(pos), axis=-1)
-        quat_finite = jp.all(jp.isfinite(quat), axis=-1)
-        vel_finite = jp.all(jp.isfinite(vel), axis=-1)
-        ang_vel_finite = jp.all(jp.isfinite(ang_vel), axis=-1)
-        quat_valid = jp.isfinite(quat_norm) & (quat_norm > 1e-8)
+        quat_norm = jnp.linalg.norm(quat, axis=-1)
+        pos_finite = jnp.all(jnp.isfinite(pos), axis=-1)
+        quat_finite = jnp.all(jnp.isfinite(quat), axis=-1)
+        vel_finite = jnp.all(jnp.isfinite(vel), axis=-1)
+        ang_vel_finite = jnp.all(jnp.isfinite(ang_vel), axis=-1)
+        quat_valid = jnp.isfinite(quat_norm) & (quat_norm > 1e-8)
         return ~(pos_finite & quat_finite & vel_finite & ang_vel_finite & quat_valid)
 
     @staticmethod
@@ -777,12 +790,12 @@ class RaceCoreEnv:
         data: EnvData,
     ) -> Array:
         ground_crash = pos[..., 2] <= 0.02
-        disabled = data.disabled_drones | jp.any(pos < data.pos_limit_low, axis=-1)
-        disabled = disabled | jp.any(pos > data.pos_limit_high, axis=-1)
+        disabled = data.disabled_drones | jnp.any(pos < data.pos_limit_low, axis=-1)
+        disabled = disabled | jnp.any(pos > data.pos_limit_high, axis=-1)
         disabled = disabled | ground_crash
         disabled = disabled | (data.target_gate == -1)
         disabled = disabled | RaceCoreEnv._invalid_drone_state(pos, quat, vel, ang_vel)
-        contacts = jp.any(contacts[:, None, :] & data.contact_masks, axis=-1)
+        contacts = jnp.any(contacts[:, None, :] & data.contact_masks, axis=-1)
         disabled = disabled | contacts
         return disabled
 
@@ -933,7 +946,7 @@ def build_track_randomization_fn(
         nominal_obstacle_pos: Array,
         key: jax.random.PRNGKey,
     ) -> Data:
-        gate_quat = jp.roll(nominal_gate_quat, 1, axis=-1)  # Convert from scipy to MuJoCo order
+        gate_quat = jnp.roll(nominal_gate_quat, 1, axis=-1)  # Convert from scipy to MuJoCo order
 
         # Reset to default track positions first
         data = data.replace(mocap_pos=data.mocap_pos.at[:, gate_mocap_ids].set(nominal_gate_pos))

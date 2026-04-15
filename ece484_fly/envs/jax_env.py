@@ -21,6 +21,7 @@ from scipy.spatial.transform import Rotation as R
 
 from ece484_fly.envs.drone_race import DroneRaceEnv, VecDroneRaceEnv
 from ece484_fly.envs.race_core import EnvData, RaceCoreEnv
+from ece484_fly.envs.utils import gate_passed
 from ece484_fly.utils import load_config
 
 
@@ -131,11 +132,15 @@ class FunctionalJaxVecDroneRaceEnv:
         gate_rot = R.from_quat(np.asarray(self.env.gates["quat"][0], dtype=np.float32))
         gate_forward = gate_rot.apply(np.array([1.0, 0.0, 0.0], dtype=np.float32))
         gate_lateral = gate_rot.apply(np.array([0.0, 1.0, 0.0], dtype=np.float32))
-        near_gate_center = gate_pos - 0.6 * gate_forward + 0.05 * np.array([0.0, 0.0, 1.0], dtype=np.float32)
-        self._reset_center = jnp.asarray(near_gate_center.reshape((1, 1, 3)), dtype=jnp.float32)
+        hover_center = gate_pos - 1.25 * gate_forward + 0.25 * np.array([0.0, 0.0, 1.0], dtype=np.float32)
+        self._reset_center = jnp.asarray(hover_center.reshape((1, 1, 3)), dtype=jnp.float32)
         self._reset_forward = jnp.asarray(gate_forward.reshape((1, 1, 3)), dtype=jnp.float32)
         self._reset_lateral = jnp.asarray(gate_lateral.reshape((1, 1, 3)), dtype=jnp.float32)
         self._world_up = jnp.asarray(np.array([0.0, 0.0, 1.0], dtype=np.float32).reshape((1, 1, 3)))
+        self._reset_quat = jnp.asarray(
+            np.broadcast_to(np.asarray(self.env.gates["quat"][0], dtype=np.float32).reshape((1, 1, 4)), (self.num_envs, self.n_drones, 4)),
+            dtype=jnp.float32,
+        )
 
         self.reset_fn = jax.jit(self._build_reset_fn())
         self.step_fn = jax.jit(self._build_step_fn())
@@ -149,9 +154,9 @@ class FunctionalJaxVecDroneRaceEnv:
 
     def _sample_reset_positions(self, key: jax.Array) -> jax.Array:
         keys = jax.random.split(key, 3)
-        along_track = jax.random.uniform(keys[0], (self.num_envs, 1, 1), minval=-0.15, maxval=0.15)
-        lateral = jax.random.uniform(keys[1], (self.num_envs, 1, 1), minval=-0.20, maxval=0.20)
-        vertical = jax.random.uniform(keys[2], (self.num_envs, 1, 1), minval=-0.10, maxval=0.10)
+        along_track = jax.random.uniform(keys[0], (self.num_envs, 1, 1), minval=-0.20, maxval=0.20)
+        lateral = jax.random.uniform(keys[1], (self.num_envs, 1, 1), minval=-0.15, maxval=0.15)
+        vertical = jax.random.uniform(keys[2], (self.num_envs, 1, 1), minval=-0.05, maxval=0.05)
         return (
             self._reset_center
             - along_track * self._reset_forward
@@ -226,7 +231,10 @@ class FunctionalJaxVecDroneRaceEnv:
 
         reset_pos = self._sample_reset_positions(subkey)
         pos = jnp.where(mask[:, None, None], reset_pos, sim_data.states.pos)
-        sim_data = sim_data.replace(states=sim_data.states.replace(pos=pos))
+        quat = jnp.where(mask[:, None, None], self._reset_quat, sim_data.states.quat)
+        vel = jnp.where(mask[:, None, None], 0.0, sim_data.states.vel)
+        ang_vel = jnp.where(mask[:, None, None], 0.0, sim_data.states.ang_vel)
+        sim_data = sim_data.replace(states=sim_data.states.replace(pos=pos, quat=quat, vel=vel, ang_vel=ang_vel))
         mjx_data = self.env.randomize_track(
             mjx_data,
             mask,
@@ -260,6 +268,20 @@ class FunctionalJaxVecDroneRaceEnv:
             sim_data, mjx_data = sync_sim2mjx(sim_data, state.mjx_data, self._mjx_model)
             contacts = mjx_data._impl.contact.dist < 0
 
+            n_gates = len(state.env_data.gate_mj_ids)
+            gates_pos = mjx_data.mocap_pos[:, state.env_data.gate_mj_ids]
+            gates_quat = mjx_data.mocap_quat[:, state.env_data.gate_mj_ids][..., [1, 2, 3, 0]]
+            gate_ids = state.env_data.gate_mj_ids[state.env_data.target_gate % n_gates]
+            gate_pos = gates_pos[jnp.arange(gates_pos.shape[0])[:, None], gate_ids]
+            gate_quat = gates_quat[jnp.arange(gates_quat.shape[0])[:, None], gate_ids]
+            passed = gate_passed(
+                sim_data.states.pos,
+                state.env_data.last_drone_pos,
+                gate_pos,
+                gate_quat,
+                (0.45, 0.45),
+            )
+
             env_data = RaceCoreEnv._step_env(
                 state.env_data,
                 sim_data.states.pos,
@@ -291,7 +313,8 @@ class FunctionalJaxVecDroneRaceEnv:
                     next_state.env_data.marked_for_reset,
                 )
             obs = self._observe(next_state)
-            return next_state, obs, reward, terminated, truncated, {}
+            info = {"passed": passed[:, 0]}
+            return next_state, obs, reward, terminated, truncated, info
 
         return step_fn
 
