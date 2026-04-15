@@ -8,6 +8,7 @@ Look for instructions in `README.md` and in the official documentation.
 """
 
 from __future__ import annotations
+from ece484_fly.train.obs import flatten_obs
 
 import logging
 import time
@@ -37,7 +38,7 @@ def simulate(
     controller: str | None = None,
     n_runs: int = 1,
     render: bool | None = None,
-    pause_on_finish: bool = False,
+    pause: bool = True,
 ) -> list[float]:
     """Evaluate the drone controller over multiple episodes.
 
@@ -47,7 +48,7 @@ def simulate(
             the controller specified in the config file is used.
         n_runs: The number of episodes.
         render: Enable/disable rendering the simulation.
-        pause_on_finish: If true, wait for Enter before closing the viewer after all runs finish.
+        pause: If true, wait for Enter before closing the viewer after all runs finish.
 
     Returns:
         A list of episode times.
@@ -58,6 +59,11 @@ def simulate(
         render = config.sim.render
     else:
         config.sim.render = render
+
+    if pause is None:
+        pause = config.sim.pause
+    else:
+        config.sim.pause = pause
     # Load the controller module
     control_path = Path(__file__).parents[1] / "ece484_fly/control"
     controller_path = control_path / (controller or config.controller.file)
@@ -94,6 +100,9 @@ def simulate(
             action = np.asarray(jp.asarray(action), copy=True)
 
             obs, reward, terminated, truncated, info = env.step(action)
+            # print(obs)
+            policy_obs= flatten_obs(obs, vectorized=False)
+            print("Flatten obs:",policy_obs.shape)
             # Update the controller internal state and models.
             controller_finished = controller.step_callback(
                 action, obs, reward, terminated, truncated, info
@@ -112,7 +121,7 @@ def simulate(
         ep_times.append(curr_time if obs["target_gate"] == -1 else None)
 
     # Close the environment
-    if config.sim.render and pause_on_finish:
+    if config.sim.render and pause:
         logger.info("Simulation finished. Keeping viewer open; press Ctrl+C to close.")
         try:
             while True:

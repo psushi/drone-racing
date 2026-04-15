@@ -132,7 +132,7 @@ The controller file is loaded from `ece484_fly/control/`. You can also set the c
 
 
 Notes:
-- `--pause_on_finish=True` keeps the MuJoCo viewer open and interactive until you press `Ctrl+C`.
+- `--pause=True` keeps the MuJoCo viewer open and interactive until you press `Ctrl+C`.
 - If you pass booleans via CLI, use `True`/`False` (capitalized) to avoid type parsing issues.
 
 ## Hardware Deployment

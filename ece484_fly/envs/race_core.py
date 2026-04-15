@@ -82,6 +82,7 @@ class EnvData:
         obstacle_mj_ids: MuJoCo IDs for the obstacles
         max_episode_steps: Maximum number of steps per episode
         sensor_range: Range at which drones can detect gates and obstacles
+        rewards: Reward for each drone in each environment for the current transition
     """
 
     # Dynamic variables
@@ -100,6 +101,7 @@ class EnvData:
     obstacle_mj_ids: Array
     max_episode_steps: Array
     sensor_range: Array
+    rewards: Array
 
     @classmethod
     def create(
@@ -133,6 +135,7 @@ class EnvData:
             obstacle_mj_ids=jp.array(obstacle_mj_ids, dtype=int, device=device),
             max_episode_steps=jp.array([max_episode_steps], dtype=int, device=device),
             sensor_range=jp.array([sensor_range], dtype=jp.float32, device=device),
+            rewards=jp.zeros((n_envs, n_drones), dtype=jp.float32, device=device),
         )
 
 
@@ -400,6 +403,9 @@ class RaceCoreEnv:
         # Apply the environment logic. Check which drones are now disabled, check which gates have
         # been passed, and update the target gate.
         drone_pos = self.sim.data.states.pos
+        drone_quat = self.sim.data.states.quat
+        drone_vel = self.sim.data.states.vel
+        drone_ang_vel = self.sim.data.states.ang_vel
         mocap_pos, mocap_quat = self.sim.mjx_data.mocap_pos, self.sim.mjx_data.mocap_quat
         contacts = self.sim.contacts()
         # Get marked_for_reset before it is updated, because the autoreset needs to be based on the
@@ -407,7 +413,15 @@ class RaceCoreEnv:
         marked_for_reset = self.data.marked_for_reset
         # Apply the environment logic with updated simulation data.
         self.data = self._step_env(
-            self.data, drone_pos, mocap_pos, mocap_quat, contacts, self.sim.freq
+            self.data,
+            drone_pos,
+            drone_quat,
+            drone_vel,
+            drone_ang_vel,
+            mocap_pos,
+            mocap_quat,
+            contacts,
+            self.sim.freq,
         )
         # Auto-reset envs. Add configuration option to disable for single-world envs
         if self.autoreset and marked_for_reset.any():
@@ -457,11 +471,18 @@ class RaceCoreEnv:
             self.data.obstacle_mj_ids,
             self.obstacles["nominal_pos"],
         )
+        pos, quat, vel, ang_vel = self._sanitize_drone_obs(
+            self.sim.data.states.pos,
+            self.sim.data.states.quat,
+            self.sim.data.states.vel,
+            self.sim.data.states.ang_vel,
+            self.data.disabled_drones,
+        )
         obs = {
-            "pos": self.sim.data.states.pos,
-            "quat": self.sim.data.states.quat,
-            "vel": self.sim.data.states.vel,
-            "ang_vel": self.sim.data.states.ang_vel,
+            "pos": pos,
+            "quat": quat,
+            "vel": vel,
+            "ang_vel": ang_vel,
             "target_gate": self.data.target_gate,
             "gates_pos": gates_pos,
             "gates_quat": gates_quat,
@@ -482,7 +503,7 @@ class RaceCoreEnv:
         Returns:
             Reward for the current state.
         """
-        return -1.0 * (self.data.target_gate == -1)  # Implicit float conversion
+        return self.data.rewards
 
     def terminated(self) -> Array:
         """Check if the episode is terminated.
@@ -534,6 +555,7 @@ class RaceCoreEnv:
             disabled_drones=disabled_drones,
             gates_visited=gates_visited,
             obstacles_visited=obstacles_visited,
+            rewards=jp.where(mask[..., None], 0.0, data.rewards),
             steps=steps,
             marked_for_reset=jp.where(mask, 0, data.marked_for_reset),  # Unmark after env reset
         )
@@ -543,15 +565,30 @@ class RaceCoreEnv:
     def _step_env(
         data: EnvData,
         drone_pos: Array,
+        drone_quat: Array,
+        drone_vel: Array,
+        drone_ang_vel: Array,
         mocap_pos: Array,
         mocap_quat: Array,
         contacts: Array,
         freq: int,
     ) -> EnvData:
         """Step the environment data."""
+        progress_reward_scale = 5.0
+        gate_pass_bonus = 3.0
+        crash_penalty = 3.0
+        step_penalty = 0.001
+
         n_gates = len(data.gate_mj_ids)
         taken_off_drones = (data.steps > freq // 5)[:, None]  # Only activate check after 0.2s
-        disabled_drones = taken_off_drones & RaceCoreEnv._disabled_drones(drone_pos, contacts, data)
+        disabled_drones = taken_off_drones & RaceCoreEnv._disabled_drones(
+            drone_pos,
+            drone_quat,
+            drone_vel,
+            drone_ang_vel,
+            contacts,
+            data,
+        )
         gates_pos = mocap_pos[:, data.gate_mj_ids]
         obstacles_pos = mocap_pos[:, data.obstacle_mj_ids]
         # We need to convert the mocap quat from MuJoCo order to scipy order
@@ -562,6 +599,17 @@ class RaceCoreEnv:
         gate_pos = gates_pos[jp.arange(gates_pos.shape[0])[:, None], gate_ids]
         gate_quat = gates_quat[jp.arange(gates_quat.shape[0])[:, None], gate_ids]
         passed = gate_passed(drone_pos, data.last_drone_pos, gate_pos, gate_quat, (0.45, 0.45))
+        prev_dist = jp.linalg.norm(data.last_drone_pos - gate_pos, axis=-1)
+        curr_dist = jp.linalg.norm(drone_pos - gate_pos, axis=-1)
+        progress_reward = progress_reward_scale * (prev_dist - curr_dist)
+        progress_reward = jp.where(passed | disabled_drones, 0.0, progress_reward)
+        newly_disabled = disabled_drones & ~data.disabled_drones
+        rewards = (
+            progress_reward
+            + gate_pass_bonus * passed.astype(jp.float32)
+            - crash_penalty * newly_disabled.astype(jp.float32)
+            - step_penalty
+        )
         # Update the target gate index. Increment by one if drones have passed a gate
         target_gate = data.target_gate + passed * ~disabled_drones
         target_gate = jp.where(target_gate >= n_gates, -1, target_gate)
@@ -581,6 +629,7 @@ class RaceCoreEnv:
             marked_for_reset=marked_for_reset,
             gates_visited=gates_visited,
             obstacles_visited=obstacles_visited,
+            rewards=rewards,
             steps=steps,
         )
         return data
@@ -613,10 +662,44 @@ class RaceCoreEnv:
         return jp.tile((steps >= max_episode_steps)[..., None], (1, n_drones))
 
     @staticmethod
-    def _disabled_drones(pos: Array, contacts: Array, data: EnvData) -> Array:
+    def _sanitize_drone_obs(
+        pos: Array,
+        quat: Array,
+        vel: Array,
+        ang_vel: Array,
+        disabled: Array,
+    ) -> tuple[Array, Array, Array, Array]:
+        invalid = disabled | RaceCoreEnv._invalid_drone_state(pos, quat, vel, ang_vel)
+        safe_quat = jp.array([0.0, 0.0, 0.0, 1.0], dtype=jp.float32)
+        pos = jp.where(invalid[..., None], 0.0, pos)
+        quat = jp.where(invalid[..., None], safe_quat, quat)
+        vel = jp.where(invalid[..., None], 0.0, vel)
+        ang_vel = jp.where(invalid[..., None], 0.0, ang_vel)
+        return pos, quat, vel, ang_vel
+
+    @staticmethod
+    def _invalid_drone_state(pos: Array, quat: Array, vel: Array, ang_vel: Array) -> Array:
+        quat_norm = jp.linalg.norm(quat, axis=-1)
+        pos_finite = jp.all(jp.isfinite(pos), axis=-1)
+        quat_finite = jp.all(jp.isfinite(quat), axis=-1)
+        vel_finite = jp.all(jp.isfinite(vel), axis=-1)
+        ang_vel_finite = jp.all(jp.isfinite(ang_vel), axis=-1)
+        quat_valid = jp.isfinite(quat_norm) & (quat_norm > 1e-8)
+        return ~(pos_finite & quat_finite & vel_finite & ang_vel_finite & quat_valid)
+
+    @staticmethod
+    def _disabled_drones(
+        pos: Array,
+        quat: Array,
+        vel: Array,
+        ang_vel: Array,
+        contacts: Array,
+        data: EnvData,
+    ) -> Array:
         disabled = data.disabled_drones | jp.any(pos < data.pos_limit_low, axis=-1)
         disabled = disabled | jp.any(pos > data.pos_limit_high, axis=-1)
         disabled = disabled | (data.target_gate == -1)
+        disabled = disabled | RaceCoreEnv._invalid_drone_state(pos, quat, vel, ang_vel)
         contacts = jp.any(contacts[:, None, :] & data.contact_masks, axis=-1)
         disabled = disabled | contacts
         return disabled
