@@ -94,6 +94,7 @@ class EnvData:
     marked_for_reset: Array
     disabled_drones: Array
     steps: Array
+    last_action: Array
     # Static variables
     contact_masks: Array
     pos_limit_low: Array
@@ -130,6 +131,7 @@ class EnvData:
             disabled_drones=jnp.zeros((n_envs, n_drones), dtype=bool, device=device),
             contact_masks=jnp.array(contact_masks, dtype=bool, device=device),
             steps=jnp.zeros(n_envs, dtype=int, device=device),
+            last_action=jnp.zeros((n_envs, n_drones, 4), dtype=jnp.float32, device=device),
             pos_limit_low=jnp.array(pos_limit_low, dtype=np.float32, device=device),
             pos_limit_high=jnp.array(pos_limit_high, dtype=np.float32, device=device),
             gate_mj_ids=jnp.array(gate_mj_ids, dtype=int, device=device),
@@ -157,8 +159,8 @@ def build_action_space(control_mode: Literal["state", "attitude"], drone_model: 
         params = ForceTorqueParams.load(drone_model)
         thrust_min, thrust_max = params.thrust_min * 4, params.thrust_max * 4
         return spaces.Box(
-            np.array([thrust_min, -np.pi / 2, -np.pi / 2, -np.pi / 2], dtype=np.float32),
-            np.array([thrust_max, np.pi / 2, np.pi / 2, np.pi / 2], dtype=np.float32),
+            np.array([-np.pi / 2, -np.pi / 2, -np.pi / 2, thrust_min], dtype=np.float32),
+            np.array([np.pi / 2, np.pi / 2, np.pi / 2, thrust_max], dtype=np.float32),
         )
     else:
         raise ValueError(f"Invalid control mode: {control_mode}")
@@ -588,6 +590,7 @@ class RaceCoreEnv:
         last_drone_pos = jnp.where(mask[..., None, None], drone_pos, data.last_drone_pos)
         disabled_drones = jnp.where(mask[..., None], False, data.disabled_drones)
         steps = jnp.where(mask, 0, data.steps)
+        last_action = jnp.where(mask[..., None, None], 0.0, data.last_action)
         # Check which gates are in range of the drone
         gates_pos = mocap_pos[:, data.gate_mj_ids]
         dpos = drone_pos[..., None, :2] - gates_pos[:, None, :, :2]
@@ -608,6 +611,7 @@ class RaceCoreEnv:
             obstacles_visited=obstacles_visited,
             rewards=jnp.where(mask[..., None], 0.0, data.rewards),
             steps=steps,
+            last_action=last_action,
             marked_for_reset=jnp.where(mask, 0, data.marked_for_reset),  # Unmark after env reset
         )
 
@@ -625,20 +629,29 @@ class RaceCoreEnv:
     def _compute_reward(
         last_drone_pos: Array,
         drone_pos: Array,
+        drone_quat: Array,
+        drone_vel: Array,
         gate_pos: Array,
         gate_quat: Array,
         passed: Array,
+        course_complete: Array,
         disabled_drones: Array,
         prev_disabled_drones: Array,
         normalized_action: Array,
+        prev_action: Array,
     ) -> Array:
         """Compute the transition reward for the current step."""
-        progress_reward_scale = 5.0
-        gate_pass_bonus = 3.0
-        crash_penalty = 3.0
-        step_penalty = 0.001
-        control_penalty_scale = 0.001
-        target_offset = 0.5
+        progress_reward_scale = 2.0
+        gate_pass_bonus = 50.0
+        finish_bonus = 200.0
+        speed_crossing_scale = 5.0
+        heading_alignment_scale = 0.3
+        crash_penalty = 10.0
+        step_penalty = 0.02
+        tilt_penalty_scale = 0.01
+        smoothness_penalty_scale = 0.005
+        target_offset = 0.0
+        absolute_dist_scale = 0.1
 
         gate_forward = RaceCoreEnv._quat_apply(
             gate_quat,
@@ -648,15 +661,39 @@ class RaceCoreEnv:
         prev_target_dist = jnp.linalg.norm(last_drone_pos - target_pos, axis=-1)
         curr_target_dist = jnp.linalg.norm(drone_pos - target_pos, axis=-1)
         progress_reward = progress_reward_scale * (prev_target_dist - curr_target_dist)
-        progress_reward = jnp.where(passed | disabled_drones, 0.0, progress_reward)
+
+        target_dir = target_pos - drone_pos
+        target_dir = target_dir / jnp.maximum(jnp.linalg.norm(target_dir, axis=-1, keepdims=True), 1e-6)
+        drone_forward = RaceCoreEnv._quat_apply(
+            drone_quat,
+            jnp.broadcast_to(jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32), drone_pos.shape),
+        )
+        heading_alignment = heading_alignment_scale * jnp.sum(drone_forward * target_dir, axis=-1)
+
+        world_up = jnp.broadcast_to(jnp.array([0.0, 0.0, 1.0], dtype=jnp.float32), drone_pos.shape)
+        drone_up = RaceCoreEnv._quat_apply(drone_quat, world_up)
+        tilt_penalty = tilt_penalty_scale * jnp.linalg.norm(drone_up[..., :2], axis=-1)
+
+        action_smoothness_penalty = smoothness_penalty_scale * jnp.mean(
+            (normalized_action - prev_action) ** 2, axis=-1
+        )
+        speed_at_crossing = speed_crossing_scale * jnp.linalg.norm(drone_vel, axis=-1) * passed.astype(jnp.float32)
+
+        progress_reward = jnp.where(disabled_drones, 0.0, progress_reward)
+        heading_alignment = jnp.where(disabled_drones, 0.0, heading_alignment)
         newly_disabled = disabled_drones & ~prev_disabled_drones
-        control_penalty = control_penalty_scale * jnp.mean(normalized_action[..., 1:] ** 2, axis=-1)
+        absolute_dist = absolute_dist_scale * curr_target_dist
         return (
             progress_reward
+            + heading_alignment
             + gate_pass_bonus * passed.astype(jnp.float32)
+            + speed_at_crossing
+            + finish_bonus * course_complete.astype(jnp.float32)
             - crash_penalty * newly_disabled.astype(jnp.float32)
             - step_penalty
-            - control_penalty
+            - tilt_penalty
+            - action_smoothness_penalty
+            - absolute_dist
         )
 
     @staticmethod
@@ -693,15 +730,20 @@ class RaceCoreEnv:
         gate_pos = gates_pos[jnp.arange(gates_pos.shape[0])[:, None], gate_ids]
         gate_quat = gates_quat[jnp.arange(gates_quat.shape[0])[:, None], gate_ids]
         passed = gate_passed(drone_pos, data.last_drone_pos, gate_pos, gate_quat, (0.45, 0.45))
+        course_complete = passed & (data.target_gate == (n_gates - 1))
         rewards = RaceCoreEnv._compute_reward(
             data.last_drone_pos,
             drone_pos,
+            drone_quat,
+            drone_vel,
             gate_pos,
             gate_quat,
             passed,
+            course_complete,
             disabled_drones,
             data.disabled_drones,
             normalized_action,
+            data.last_action,
         )
         # Update the target gate index. Increment by one if drones have passed a gate
         target_gate = data.target_gate + passed * ~disabled_drones
@@ -724,6 +766,7 @@ class RaceCoreEnv:
             obstacles_visited=obstacles_visited,
             rewards=rewards,
             steps=steps,
+            last_action=normalized_action,
         )
         return data
 

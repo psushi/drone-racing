@@ -104,6 +104,7 @@ strain = ".pixi/envs/default/bin/python scripts/run_train.py"
 debug = ".pixi/envs/default/bin/python scripts/debug_reward.py"
 inspect = ".pixi/envs/default/bin/python scripts/inspect_env.py"
 watch = ".pixi/envs/default/bin/python scripts/watch_policy.py"
+validate = ".pixi/envs/default/bin/python scripts/validate_attitude_actions.py"
 train_jax = ".pixi/envs/default/bin/python scripts/run_vtrain_jax_full.py"
 
 [tool.pixi.dependencies]

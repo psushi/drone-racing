@@ -51,8 +51,8 @@ def inspect_env(
         print("Approx hover thrust (N):", hover_thrust)
 
         if cfg.env.control_mode == "attitude":
-            thrust_low = action_low[0]
-            thrust_high = action_high[0]
+            thrust_low = action_low[3]
+            thrust_high = action_high[3]
             thrust_mid = 0.5 * (thrust_low + thrust_high)
             hover_normalized = 2.0 * (hover_thrust - thrust_low) / (thrust_high - thrust_low) - 1.0
             print("Thrust action range:", np.array([thrust_low, thrust_high], dtype=np.float32))
