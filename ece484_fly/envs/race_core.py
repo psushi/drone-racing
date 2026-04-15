@@ -638,16 +638,16 @@ class RaceCoreEnv:
         crash_penalty = 3.0
         step_penalty = 0.001
         control_penalty_scale = 0.001
+        target_offset = 0.5
 
         gate_forward = RaceCoreEnv._quat_apply(
             gate_quat,
             jnp.broadcast_to(jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32), gate_pos.shape),
         )
-        prev_gate_progress = jnp.sum((last_drone_pos - gate_pos) * gate_forward, axis=-1)
-        curr_gate_progress = jnp.sum((drone_pos - gate_pos) * gate_forward, axis=-1)
-        # Reward progress toward increasing signed gate-plane position, i.e. moving from the
-        # approach side through the gate plane instead of farther away behind it.
-        progress_reward = progress_reward_scale * (curr_gate_progress - prev_gate_progress)
+        target_pos = gate_pos + target_offset * gate_forward
+        prev_target_dist = jnp.linalg.norm(last_drone_pos - target_pos, axis=-1)
+        curr_target_dist = jnp.linalg.norm(drone_pos - target_pos, axis=-1)
+        progress_reward = progress_reward_scale * (prev_target_dist - curr_target_dist)
         progress_reward = jnp.where(passed | disabled_drones, 0.0, progress_reward)
         newly_disabled = disabled_drones & ~prev_disabled_drones
         control_penalty = control_penalty_scale * jnp.mean(normalized_action[..., 1:] ** 2, axis=-1)

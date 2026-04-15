@@ -4,6 +4,8 @@ import jax
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
+TARGET_OFFSET = 0.5
+
 
 def k_nearest_obstacles(obstacle_pos: np.ndarray, pos: np.ndarray, k: int) -> np.ndarray:
     """Find the k nearest obstacles to the drone."""
@@ -74,7 +76,10 @@ def flatten_obs(observations: dict, vectorized: bool) -> np.ndarray:
     R_bw = R.from_quat(body_quat).inv() # world to body 
 
     gate_pos = obs["gates_pos"][batch_idx,target_gates] # (N,3)
-    rel_gate_pos_w = gate_pos - pos # (N,3)
+    gate_rot = R.from_quat(obs["gates_quat"][batch_idx,target_gates])
+    gate_forward_w = gate_rot.apply(np.array([1,0,0], dtype=np.float32))
+    target_pos = gate_pos + TARGET_OFFSET * gate_forward_w
+    rel_gate_pos_w = target_pos - pos # (N,3)
     rel_gate_pos_b = R_bw.apply(rel_gate_pos_w) # (N,3) (OBS)
 
 
@@ -87,9 +92,7 @@ def flatten_obs(observations: dict, vectorized: bool) -> np.ndarray:
     vel_b = R_bw.apply(obs["vel"]) # (N,3) (OBS)
     ang_vel_b = R_bw.apply(obs["ang_vel"]) # (N,3) (OBS)
 
-
-    R_wg = R.from_quat(obs["gates_quat"][batch_idx,target_gates])
-    gate_normal_b = R_bw.apply(R_wg.apply(np.array([1,0,0]))) # gate normal in body frame (OBS) (N, 3)
+    gate_normal_b = R_bw.apply(gate_forward_w) # gate normal in body frame (OBS) (N, 3)
 
     gravity =  R_bw.apply(np.array([0,0,-1], dtype=np.float32)) #(N, 3)
     gates_visited = obs["gates_visited"] # (N,Num gates) (OBS)
@@ -146,7 +149,13 @@ def flatten_obs_jax(observations: dict[str, jax.Array], vectorized: bool) -> jax
     target_gates = jnp.asarray(observations["target_gate"], dtype=jnp.int32)
 
     gate_pos = observations["gates_pos"][batch_idx, target_gates]
-    rel_gate_pos_w = gate_pos - pos
+    gate_quat = jnp.asarray(observations["gates_quat"], dtype=jnp.float32)[batch_idx, target_gates]
+    gate_forward_w = _quat_apply_jax(
+        gate_quat,
+        jnp.tile(jnp.array([[1.0, 0.0, 0.0]], dtype=jnp.float32), (pos.shape[0], 1)),
+    )
+    target_pos = gate_pos + TARGET_OFFSET * gate_forward_w
+    rel_gate_pos_w = target_pos - pos
     rel_gate_pos_b = _quat_apply_jax(r_bw, rel_gate_pos_w)
 
     nearest_obs_w = k_nearest_obstacles_jax(jnp.asarray(observations["obstacles_pos"], dtype=jnp.float32), pos, k=K)
@@ -159,9 +168,7 @@ def flatten_obs_jax(observations: dict[str, jax.Array], vectorized: bool) -> jax
     vel_b = _quat_apply_jax(r_bw, jnp.asarray(observations["vel"], dtype=jnp.float32))
     ang_vel_b = _quat_apply_jax(r_bw, jnp.asarray(observations["ang_vel"], dtype=jnp.float32))
 
-    gate_quat = jnp.asarray(observations["gates_quat"], dtype=jnp.float32)[batch_idx, target_gates]
-    gate_normal_w = _quat_apply_jax(gate_quat, jnp.tile(jnp.array([[1.0, 0.0, 0.0]], dtype=jnp.float32), (pos.shape[0], 1)))
-    gate_normal_b = _quat_apply_jax(r_bw, gate_normal_w)
+    gate_normal_b = _quat_apply_jax(r_bw, gate_forward_w)
 
     gravity_world = jnp.tile(jnp.array([[0.0, 0.0, -1.0]], dtype=jnp.float32), (pos.shape[0], 1))
     gravity_b = _quat_apply_jax(r_bw, gravity_world)
