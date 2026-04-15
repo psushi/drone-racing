@@ -601,10 +601,20 @@ class RaceCoreEnv:
         )
 
     @staticmethod
+    def _quat_apply(quat: Array, vec: Array) -> Array:
+        """Rotate a world-space vector by a quaternion in [x, y, z, w] order."""
+        q_xyz = quat[..., :3]
+        q_w = quat[..., 3:4]
+        uv = jp.cross(q_xyz, vec)
+        uuv = jp.cross(q_xyz, uv)
+        return vec + 2.0 * (q_w * uv + uuv)
+
+    @staticmethod
     @jax.jit
     def _compute_reward(
         last_drone_pos: Array,
         drone_pos: Array,
+        drone_quat: Array,
         gate_pos: Array,
         passed: Array,
         disabled_drones: Array,
@@ -617,15 +627,26 @@ class RaceCoreEnv:
         crash_penalty = 3.0
         step_penalty = 0.001
         control_penalty_scale = 0.001
+        alignment_reward_scale = 0.2
 
         prev_dist = jp.linalg.norm(last_drone_pos - gate_pos, axis=-1)
         curr_dist = jp.linalg.norm(drone_pos - gate_pos, axis=-1)
         progress_reward = progress_reward_scale * (prev_dist - curr_dist)
         progress_reward = jp.where(passed | disabled_drones, 0.0, progress_reward)
+        gate_dir = gate_pos - drone_pos
+        gate_dir = gate_dir / jp.maximum(jp.linalg.norm(gate_dir, axis=-1, keepdims=True), 1e-6)
+        body_forward = jp.broadcast_to(
+            jp.array([1.0, 0.0, 0.0], dtype=jp.float32),
+            gate_dir.shape,
+        )
+        drone_forward = RaceCoreEnv._quat_apply(drone_quat, body_forward)
+        alignment_reward = alignment_reward_scale * jp.sum(drone_forward * gate_dir, axis=-1)
+        alignment_reward = jp.where(passed | disabled_drones, 0.0, alignment_reward)
         newly_disabled = disabled_drones & ~prev_disabled_drones
         control_penalty = control_penalty_scale * jp.mean(normalized_action[..., 1:] ** 2, axis=-1)
         return (
             progress_reward
+            + alignment_reward
             + gate_pass_bonus * passed.astype(jp.float32)
             - crash_penalty * newly_disabled.astype(jp.float32)
             - step_penalty
@@ -669,6 +690,7 @@ class RaceCoreEnv:
         rewards = RaceCoreEnv._compute_reward(
             data.last_drone_pos,
             drone_pos,
+            drone_quat,
             gate_pos,
             passed,
             disabled_drones,
