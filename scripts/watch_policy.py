@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 def watch_policy(
-    checkpoint_path: str = "artifacts/policy_jax.msgpack",
+    checkpoint_path: str = "artifacts/policy_jax_full.msgpack",
     config: str = "level1.toml",
     seed: int = 0,
     pause: bool = False,
