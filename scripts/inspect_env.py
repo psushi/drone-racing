@@ -10,6 +10,7 @@ import gymnasium
 import numpy as np
 
 import ece484_fly.envs  # noqa: F401
+from ece484_fly.train.utils import select_device
 from ece484_fly.utils import load_config
 
 
@@ -19,9 +20,11 @@ logger = logging.getLogger(__name__)
 def inspect_env(
     config: str = "level1.toml",
     seed: int = 0,
+    device: str = "auto",
 ) -> None:
     """Print action-space and drone-parameter information for the sim env."""
     cfg = load_config(Path(__file__).parents[1] / "config" / config)
+    device = select_device(device)
     env = gymnasium.make(
         cfg.env.id,
         freq=cfg.env.freq,
@@ -32,6 +35,7 @@ def inspect_env(
         disturbances=cfg.env.get("disturbances"),
         randomizations=cfg.env.get("randomizations"),
         seed=seed,
+        device=device,
     )
 
     try:

@@ -29,7 +29,7 @@ class ActorCritic(nn.Module):
         # destabilize the drone before PPO can learn a useful hover-like behavior.
         log_std = self.param(
             'log_std',
-            lambda key, shape: jnp.full(shape, -1.0, dtype=jnp.float32),
+            lambda key, shape: jnp.full(shape, -1.5, dtype=jnp.float32),
             (self.action_dim,),
         )
 

@@ -1,7 +1,7 @@
 """Train PPO on a single drone racing environment."""
 
 from __future__ import annotations
-from ece484_fly.train.utils import normalize_actions
+from ece484_fly.train.utils import normalize_actions, select_device
 
 import logging
 from pathlib import Path
@@ -27,9 +27,13 @@ logger = logging.getLogger(__name__)
 def run_train(
     config: str = "level1.toml",
     seed: int = 0,
+    device: str = "auto",
 ) -> None:
     """Create the single-env trainer and run PPO."""
     cfg = load_config(Path(__file__).parents[1] / "config" / config)
+    device = select_device(device)
+    print("JAX devices:", jax.devices())
+    print("Using device:", device)
     env = gymnasium.make(
         cfg.env.id,
         freq=cfg.env.freq,
@@ -40,6 +44,7 @@ def run_train(
         disturbances=cfg.env.get("disturbances"),
         randomizations=cfg.env.get("randomizations"),
         seed=seed,
+        device=device,
     )
 
     model = ActorCritic(action_dim=4, hidden_dim=(128, 128), activation="tanh")

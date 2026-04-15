@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from flax import serialization
-from ece484_fly.train.utils import normalize_actions
+from ece484_fly.train.utils import normalize_actions, select_device
 from ece484_fly.envs.drone_race import VecDroneRaceEnv
 import optax
 from ece484_fly.train.train import flatten_rollout_batch, make_minibatches, make_update_fn
@@ -46,9 +46,13 @@ def run_train(
     num_envs: int = 100,
     seed: int = 0,
     checkpoint_path: str = "artifacts/policy.msgpack",
+    device: str = "auto",
 ) -> None:
     """Create the vectorized env and print observation/action metadata."""
     cfg = load_config(Path(__file__).parents[1] / "config" / config)
+    device = select_device(device)
+    print("JAX devices:", jax.devices())
+    print("Using device:", device)
     env: VectorEnv = gymnasium.make_vec(
         cfg.env.id,
         num_envs= num_envs if cfg.train.num_envs is None else cfg.train.num_envs,
@@ -61,6 +65,7 @@ def run_train(
         disturbances=cfg.env.get("disturbances"),
         randomizations=cfg.env.get("randomizations"),
         seed=seed,
+        device=device,
     )
 
     model = ActorCritic(action_dim=4, hidden_dim=(128, 128), activation="tanh")

@@ -17,7 +17,7 @@ from gymnasium.wrappers.jax_to_numpy import JaxToNumpy
 import ece484_fly.envs  # noqa: F401
 from ece484_fly.train import flatten_obs
 from ece484_fly.train.actor_critic_models import ActorCritic
-from ece484_fly.train.utils import normalize_actions
+from ece484_fly.train.utils import normalize_actions, select_device
 from ece484_fly.utils import load_config
 
 
@@ -29,11 +29,15 @@ def watch_policy(
     config: str = "level1.toml",
     seed: int = 0,
     pause: bool = False,
+    device: str = "auto",
 ) -> None:
     """Load a saved policy and render rollouts in a single env."""
     cfg = load_config(Path(__file__).parents[1] / "config" / config)
     cfg.sim.render = True
     cfg.sim.pause = pause
+    device = select_device(device)
+    print("JAX devices:", jax.devices())
+    print("Using device:", device)
     env = gymnasium.make(
         cfg.env.id,
         freq=cfg.env.freq,
@@ -44,6 +48,7 @@ def watch_policy(
         disturbances=cfg.env.get("disturbances"),
         randomizations=cfg.env.get("randomizations"),
         seed=seed,
+        device=device,
     )
     env = JaxToNumpy(env)
 

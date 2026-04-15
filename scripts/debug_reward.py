@@ -16,6 +16,7 @@ import numpy as np
 from gymnasium.wrappers.jax_to_numpy import JaxToNumpy
 
 import ece484_fly.envs  # noqa: F401
+from ece484_fly.train.utils import select_device
 from ece484_fly.utils import load_config
 
 
@@ -42,11 +43,13 @@ def debug_reward(
     step_size_z: float = 0.05,
     yaw_step: float = 0.15,
     render: bool = True,
+    device: str = "auto",
 ) -> None:
     """Run a manual-control debug loop for inspecting reward behavior."""
     cfg = load_config(Path(__file__).parents[1] / "config" / config)
     cfg.env.control_mode = "state"
     cfg.sim.render = render
+    device = select_device(device)
 
     env = gymnasium.make(
         cfg.env.id,
@@ -58,6 +61,7 @@ def debug_reward(
         disturbances=cfg.env.get("disturbances"),
         randomizations=cfg.env.get("randomizations"),
         seed=seed,
+        device=device,
     )
     env = JaxToNumpy(env)
 
