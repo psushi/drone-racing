@@ -102,6 +102,8 @@ deploy = ".pixi/envs/deploy/bin/python scripts/deploy.py"
 train = ".pixi/envs/default/bin/python scripts/run_vtrain.py"
 strain = ".pixi/envs/default/bin/python scripts/run_train.py"
 debug = ".pixi/envs/default/bin/python scripts/debug_reward.py"
+inspect = ".pixi/envs/default/bin/python scripts/inspect_env.py"
+watch = ".pixi/envs/default/bin/python scripts/watch_policy.py"
 
 [tool.pixi.dependencies]
 openblas = ">=0.3.30,<0.4"

@@ -33,6 +33,7 @@ from crazyflow.sim.sim import use_box_collision
 from drone_controllers.mellinger.params import ForceTorqueParams
 from flax.struct import dataclass
 from gymnasium import spaces
+from scipy.spatial.transform import Rotation as R
 
 from ece484_fly.envs.randomize import (
     randomize_drone_inertia_fn,
@@ -156,8 +157,8 @@ def build_action_space(control_mode: Literal["state", "attitude"], drone_model: 
         params = ForceTorqueParams.load(drone_model)
         thrust_min, thrust_max = params.thrust_min * 4, params.thrust_max * 4
         return spaces.Box(
-            np.array([-np.pi / 2, -np.pi / 2, -np.pi / 2, thrust_min], dtype=np.float32),
-            np.array([np.pi / 2, np.pi / 2, np.pi / 2, thrust_max], dtype=np.float32),
+            np.array([thrust_min, -np.pi / 2, -np.pi / 2, -np.pi / 2], dtype=np.float32),
+            np.array([thrust_max, np.pi / 2, np.pi / 2, np.pi / 2], dtype=np.float32),
         )
     else:
         raise ValueError(f"Invalid control mode: {control_mode}")
@@ -357,13 +358,13 @@ class RaceCoreEnv:
         self.gates, self.obstacles, self.drone = load_track(track)
         # Randomize the track
         self.sim.data = self.sim.data.replace(core=self.sim.data.core.replace(rng_key=key))
+        reset_pos = self._sample_reset_positions(subkey)
 
         @jax.jit
         def update_sim_data(
             data: SimData, mjx_data: Data, key: jax.random.PRNGKey
         ) -> tuple[SimData, Data]:
-            # Randomized drone pos
-            pos = data.states.pos.at[...].set(self.drone["pos"])
+            pos = data.states.pos.at[...].set(reset_pos)
             data = data.replace(states=data.states.replace(pos=pos))
 
             mjx_data = self.randomize_track(
@@ -385,6 +386,28 @@ class RaceCoreEnv:
 
         return self.obs(), self.info()
 
+    def _sample_reset_positions(self, key: jax.random.PRNGKey) -> Array:
+        """Sample reset positions near the first target gate."""
+        gate_pos = np.asarray(self.gates["pos"][0], dtype=np.float32)
+        gate_rot = R.from_quat(np.asarray(self.gates["quat"][0], dtype=np.float32))
+        gate_forward = gate_rot.apply(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+        gate_lateral = gate_rot.apply(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+
+        near_gate_center = gate_pos - 0.6 * gate_forward + 0.05 * np.array([0.0, 0.0, 1.0], dtype=np.float32)
+        near_gate_center = near_gate_center.reshape((1, 1, 3))
+
+        keys = jax.random.split(key, 3)
+        along_track = jax.random.uniform(keys[0], (self.sim.n_worlds, 1, 1), minval=-0.15, maxval=0.15)
+        lateral = jax.random.uniform(keys[1], (self.sim.n_worlds, 1, 1), minval=-0.20, maxval=0.20)
+        vertical = jax.random.uniform(keys[2], (self.sim.n_worlds, 1, 1), minval=-0.10, maxval=0.10)
+        near_gate_pos = (
+            near_gate_center
+            - along_track * gate_forward.reshape((1, 1, 3))
+            + lateral * gate_lateral.reshape((1, 1, 3))
+            + vertical * np.array([0.0, 0.0, 1.0], dtype=np.float32).reshape((1, 1, 3))
+        )
+        return near_gate_pos
+
     def _step(self, action: Array) -> tuple[dict[str, Array], float, bool, bool, dict]:
         """Step the firmware_wrapper class and its environment.
 
@@ -395,6 +418,7 @@ class RaceCoreEnv:
             action: Full-state command [x, y, z, vx, vy, vz, ax, ay, az, yaw, rrate, prate, yrate]
                 to follow.
         """
+        normalized_action = self._normalize_action(action)
         self.apply_action(action)
         self.sim.step(self.sim.freq // self.freq)
         # Warp drones that have crashed outside the track to prevent them from interfering with
@@ -408,9 +432,6 @@ class RaceCoreEnv:
         drone_ang_vel = self.sim.data.states.ang_vel
         mocap_pos, mocap_quat = self.sim.mjx_data.mocap_pos, self.sim.mjx_data.mocap_quat
         contacts = self.sim.contacts()
-        # Get marked_for_reset before it is updated, because the autoreset needs to be based on the
-        # previous flags, not the ones from the current step
-        marked_for_reset = self.data.marked_for_reset
         # Apply the environment logic with updated simulation data.
         self.data = self._step_env(
             self.data,
@@ -418,15 +439,34 @@ class RaceCoreEnv:
             drone_quat,
             drone_vel,
             drone_ang_vel,
+            normalized_action,
             mocap_pos,
             mocap_quat,
             contacts,
             self.sim.freq,
         )
-        # Auto-reset envs. Add configuration option to disable for single-world envs
+        reward = self.reward()
+        terminated = self.terminated()
+        truncated = self.truncated()
+        info = self.info()
+        marked_for_reset = self.data.marked_for_reset
+        # Reset finished worlds immediately so the next policy call sees a fresh observation while
+        # reward/done still describe the transition that just ended.
         if self.autoreset and marked_for_reset.any():
-            self._reset(mask=marked_for_reset)
-        return self.obs(), self.reward(), self.terminated(), self.truncated(), self.info()
+            obs, _ = self._reset(mask=marked_for_reset)
+        else:
+            obs = self.obs()
+        return obs, reward, terminated, truncated, info
+
+    def _normalize_action(self, action: Array) -> Array:
+        """Map the applied action into [-1, 1] per dimension for control regularization."""
+        base_action_space = (
+            self.single_action_space if hasattr(self, "single_action_space") else self.action_space
+        )
+        action_low = jp.asarray(base_action_space.low, dtype=jp.float32).reshape((1, 1, -1))
+        action_high = jp.asarray(base_action_space.high, dtype=jp.float32).reshape((1, 1, -1))
+        action = jp.asarray(action, dtype=jp.float32).reshape((self.sim.n_worlds, self.sim.n_drones, -1))
+        return 2.0 * (action - action_low) / (action_high - action_low) - 1.0
 
     def apply_action(self, action: Array):
         """Apply the commanded state action to the simulation."""
@@ -562,26 +602,53 @@ class RaceCoreEnv:
 
     @staticmethod
     @jax.jit
+    def _compute_reward(
+        last_drone_pos: Array,
+        drone_pos: Array,
+        gate_pos: Array,
+        passed: Array,
+        disabled_drones: Array,
+        prev_disabled_drones: Array,
+        normalized_action: Array,
+    ) -> Array:
+        """Compute the transition reward for the current step."""
+        progress_reward_scale = 5.0
+        gate_pass_bonus = 3.0
+        crash_penalty = 3.0
+        step_penalty = 0.001
+        control_penalty_scale = 0.001
+
+        prev_dist = jp.linalg.norm(last_drone_pos - gate_pos, axis=-1)
+        curr_dist = jp.linalg.norm(drone_pos - gate_pos, axis=-1)
+        progress_reward = progress_reward_scale * (prev_dist - curr_dist)
+        progress_reward = jp.where(passed | disabled_drones, 0.0, progress_reward)
+        newly_disabled = disabled_drones & ~prev_disabled_drones
+        control_penalty = control_penalty_scale * jp.mean(normalized_action[..., 1:] ** 2, axis=-1)
+        return (
+            progress_reward
+            + gate_pass_bonus * passed.astype(jp.float32)
+            - crash_penalty * newly_disabled.astype(jp.float32)
+            - step_penalty
+            - control_penalty
+        )
+
+    @staticmethod
+    @jax.jit
     def _step_env(
         data: EnvData,
         drone_pos: Array,
         drone_quat: Array,
         drone_vel: Array,
         drone_ang_vel: Array,
+        normalized_action: Array,
         mocap_pos: Array,
         mocap_quat: Array,
         contacts: Array,
         freq: int,
     ) -> EnvData:
         """Step the environment data."""
-        progress_reward_scale = 5.0
-        gate_pass_bonus = 3.0
-        crash_penalty = 3.0
-        step_penalty = 0.001
-
         n_gates = len(data.gate_mj_ids)
-        taken_off_drones = (data.steps > freq // 5)[:, None]  # Only activate check after 0.2s
-        disabled_drones = taken_off_drones & RaceCoreEnv._disabled_drones(
+        disabled_drones = RaceCoreEnv._disabled_drones(
             drone_pos,
             drone_quat,
             drone_vel,
@@ -599,16 +666,14 @@ class RaceCoreEnv:
         gate_pos = gates_pos[jp.arange(gates_pos.shape[0])[:, None], gate_ids]
         gate_quat = gates_quat[jp.arange(gates_quat.shape[0])[:, None], gate_ids]
         passed = gate_passed(drone_pos, data.last_drone_pos, gate_pos, gate_quat, (0.45, 0.45))
-        prev_dist = jp.linalg.norm(data.last_drone_pos - gate_pos, axis=-1)
-        curr_dist = jp.linalg.norm(drone_pos - gate_pos, axis=-1)
-        progress_reward = progress_reward_scale * (prev_dist - curr_dist)
-        progress_reward = jp.where(passed | disabled_drones, 0.0, progress_reward)
-        newly_disabled = disabled_drones & ~data.disabled_drones
-        rewards = (
-            progress_reward
-            + gate_pass_bonus * passed.astype(jp.float32)
-            - crash_penalty * newly_disabled.astype(jp.float32)
-            - step_penalty
+        rewards = RaceCoreEnv._compute_reward(
+            data.last_drone_pos,
+            drone_pos,
+            gate_pos,
+            passed,
+            disabled_drones,
+            data.disabled_drones,
+            normalized_action,
         )
         # Update the target gate index. Increment by one if drones have passed a gate
         target_gate = data.target_gate + passed * ~disabled_drones
@@ -696,8 +761,10 @@ class RaceCoreEnv:
         contacts: Array,
         data: EnvData,
     ) -> Array:
+        ground_crash = pos[..., 2] <= 0.02
         disabled = data.disabled_drones | jp.any(pos < data.pos_limit_low, axis=-1)
         disabled = disabled | jp.any(pos > data.pos_limit_high, axis=-1)
+        disabled = disabled | ground_crash
         disabled = disabled | (data.target_gate == -1)
         disabled = disabled | RaceCoreEnv._invalid_drone_state(pos, quat, vel, ang_vel)
         contacts = jp.any(contacts[:, None, :] & data.contact_masks, axis=-1)

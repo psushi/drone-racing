@@ -25,7 +25,13 @@ class ActorCritic(nn.Module):
             x = activation(x)
 
         actor_mean = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0))(x)
-        log_std = self.param('log_std', nn.initializers.zeros, (self.action_dim,))
+        # Start with lower exploration noise because random high-variance attitude/thrust commands
+        # destabilize the drone before PPO can learn a useful hover-like behavior.
+        log_std = self.param(
+            'log_std',
+            lambda key, shape: jnp.full(shape, -1.0, dtype=jnp.float32),
+            (self.action_dim,),
+        )
 
         for dim in self.hidden_dim:
             x = nn.Dense(dim, kernel_init=orthogonal(jnp.sqrt(2)), bias_init=constant(0.0))(x)
@@ -109,4 +115,3 @@ def ppo_loss(
     total_loss = actor_loss + vf_coef *  value_loss - ent_coef * entropy
 
     return total_loss, (actor_loss, value_loss, entropy)
-

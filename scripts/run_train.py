@@ -1,6 +1,7 @@
 """Train PPO on a single drone racing environment."""
 
 from __future__ import annotations
+from ece484_fly.train.utils import normalize_actions
 
 import logging
 from pathlib import Path
@@ -52,8 +53,6 @@ def run_train(
     opt_state = tx.init(params)
     update_step = make_update_fn(model, tx, cfg.train.clip_eps, cfg.train.vf_coef, cfg.train.ent_coef)
     obs, info = env.reset(seed=seed)
-    print("Action low:", env.action_space.low)
-    print("Action high:", env.action_space.high)
     action_low = np.asarray(env.action_space.low, dtype=np.float32)
     action_high = np.asarray(env.action_space.high, dtype=np.float32)
     try:
@@ -77,13 +76,12 @@ def run_train(
                 log_probs.append(np.asarray(log_prob))
                 values.append(np.asarray(value))
                 actions.append(np.asarray(action))
-
                 raw_action = np.asarray(action[0], dtype=np.float32)
-                applied_action = np.clip(raw_action, action_low, action_high)
-                obs, reward, terminated, truncated, info = env.step(applied_action)
+                action = normalize_actions(raw_action, action_low, action_high)
+                obs, reward, terminated, truncated, info = env.step(action)
                 if i < 10:
                     print("Raw action:", raw_action)
-                    print("Applied action:", applied_action)
+                    print("Applied action:", action)
                     print("Reward:", reward)
                     print("Prev pos:", prev_pos)
                     print("Curr pos:", np.asarray(obs["pos"], dtype=np.float32))
