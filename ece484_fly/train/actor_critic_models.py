@@ -32,6 +32,8 @@ class ActorCritic(nn.Module):
             lambda key, shape: jnp.full(shape, -1.5, dtype=jnp.float32),
             (self.action_dim,),
         )
+        # Keep exploration from collapsing too early or blowing up later in training.
+        log_std = jnp.clip(log_std, -1.0, 0.5)
 
         for dim in self.hidden_dim:
             x = nn.Dense(dim, kernel_init=orthogonal(jnp.sqrt(2)), bias_init=constant(0.0))(x)

@@ -56,8 +56,7 @@ def make_metrics_table(metrics: dict[str, float | int]) -> Table:
 
 
 def scale_actions_jax(actions: jax.Array, action_low: jax.Array, action_high: jax.Array) -> jax.Array:
-    norm_actions = jnp.tanh(actions)
-    return action_low + 0.5 * (norm_actions + 1.0) * (action_high - action_low)
+    return jnp.clip(actions, action_low, action_high)
 
 
 def create_train_state(
@@ -71,7 +70,7 @@ def create_train_state(
     params = model.init(rng, dummy_obs)
     tx = optax.chain(
         optax.clip_by_global_norm(max_grad_norm),
-        optax.adamw(learning_rate=lr, eps=1e-8),
+        optax.adam(learning_rate=lr, eps=1e-8),
     )
     return TrainState.create(apply_fn=model.apply, params=params, tx=tx)
 
@@ -100,9 +99,9 @@ def make_minibatches(batch: dict[str, jax.Array], rng: jax.Array, num_minibatche
     )
 
 
-def make_update_step(model: ActorCritic, clip_eps: float, vf_coef: float, ent_coef: float):
+def make_update_step(model: ActorCritic, clip_eps: float, vf_coef: float):
     @jax.jit
-    def update_step(train_state: TrainState, minibatch: dict[str, jax.Array]):
+    def update_step(train_state: TrainState, minibatch: dict[str, jax.Array], ent_coef: jax.Array):
         def loss_fn(params):
             return ppo_loss(
                 params,
@@ -181,13 +180,12 @@ def make_train_iteration_fn(
     gae_lambda: float,
     clip_eps: float,
     vf_coef: float,
-    ent_coef: float,
 ):
     collect_rollout = make_collect_rollout_fn(model, env, action_low, action_high, num_steps)
-    update_step = make_update_step(model, clip_eps, vf_coef, ent_coef)
+    update_step = make_update_step(model, clip_eps, vf_coef)
 
     @jax.jit
-    def train_iteration(runner_state: RunnerState):
+    def train_iteration(runner_state: RunnerState, ent_coef: jax.Array):
         runner_state, rollout = collect_rollout(runner_state)
         _, last_value = model.apply(runner_state.train_state.params, runner_state.last_obs)
 
@@ -207,7 +205,7 @@ def make_train_iteration_fn(
             minibatches = make_minibatches(batch, mb_key, num_minibatches)
 
             def minibatch_step(train_state: TrainState, minibatch: dict[str, jax.Array]):
-                return update_step(train_state, minibatch)
+                return update_step(train_state, minibatch, ent_coef)
 
             train_state, metrics = jax.lax.scan(minibatch_step, train_state, minibatches)
             mean_metrics = jax.tree_util.tree_map(lambda x: jnp.mean(x, axis=0), metrics)
@@ -272,7 +270,6 @@ def run_train(
         gae_lambda=cfg.train.lambda_,
         clip_eps=cfg.train.clip_eps,
         vf_coef=cfg.train.vf_coef,
-        ent_coef=cfg.train.ent_coef,
     )
 
     total_reward_sum = 0.0
@@ -287,10 +284,15 @@ def run_train(
             "actor_loss": 0.0,
             "value_loss": 0.0,
             "entropy": 0.0,
+            "ent_coef": float(cfg.train.ent_coef),
         }
         with Live(make_metrics_table(live_metrics), refresh_per_second=4) as live:
             for iter_idx in range(cfg.train.num_iterations):
-                runner_state, rollout, metrics = train_iteration(runner_state)
+                progress = iter_idx / max(cfg.train.num_iterations - 1, 1)
+                current_ent_coef = cfg.train.ent_coef * (1.0 - 0.9 * progress)
+                runner_state, rollout, metrics = train_iteration(
+                    runner_state, jnp.asarray(current_ent_coef, dtype=jnp.float32)
+                )
                 rewards = jax.device_get(rollout.reward)
                 dones = jax.device_get(rollout.done)
                 epoch_metrics = jax.device_get(metrics)
@@ -306,6 +308,7 @@ def run_train(
                     "actor_loss": float(epoch_metrics["actor_loss"][-1]),
                     "value_loss": float(epoch_metrics["value_loss"][-1]),
                     "entropy": float(epoch_metrics["entropy"][-1]),
+                    "ent_coef": float(current_ent_coef),
                 }
                 live.update(make_metrics_table(live_metrics))
 

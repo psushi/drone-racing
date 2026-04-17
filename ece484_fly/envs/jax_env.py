@@ -132,7 +132,7 @@ class FunctionalJaxVecDroneRaceEnv:
         gate_rot = R.from_quat(np.asarray(self.env.gates["quat"][0], dtype=np.float32))
         gate_forward = gate_rot.apply(np.array([1.0, 0.0, 0.0], dtype=np.float32))
         gate_lateral = gate_rot.apply(np.array([0.0, 1.0, 0.0], dtype=np.float32))
-        hover_center = gate_pos - 1.25 * gate_forward + 0.25 * np.array([0.0, 0.0, 1.0], dtype=np.float32)
+        hover_center = gate_pos - 1.25 * gate_forward
         self._reset_center = jnp.asarray(hover_center.reshape((1, 1, 3)), dtype=jnp.float32)
         self._reset_forward = jnp.asarray(gate_forward.reshape((1, 1, 3)), dtype=jnp.float32)
         self._reset_lateral = jnp.asarray(gate_lateral.reshape((1, 1, 3)), dtype=jnp.float32)
@@ -154,9 +154,9 @@ class FunctionalJaxVecDroneRaceEnv:
 
     def _sample_reset_positions(self, key: jax.Array) -> jax.Array:
         keys = jax.random.split(key, 3)
-        along_track = jax.random.uniform(keys[0], (self.num_envs, 1, 1), minval=-0.20, maxval=0.20)
-        lateral = jax.random.uniform(keys[1], (self.num_envs, 1, 1), minval=-0.15, maxval=0.15)
-        vertical = jax.random.uniform(keys[2], (self.num_envs, 1, 1), minval=-0.05, maxval=0.05)
+        along_track = jax.random.uniform(keys[0], (self.num_envs, 1, 1), minval=-0.10, maxval=0.10)
+        lateral = jax.random.uniform(keys[1], (self.num_envs, 1, 1), minval=-0.05, maxval=0.05)
+        vertical = jax.random.uniform(keys[2], (self.num_envs, 1, 1), minval=-0.02, maxval=0.02)
         return (
             self._reset_center
             - along_track * self._reset_forward

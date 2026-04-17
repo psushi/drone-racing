@@ -399,13 +399,13 @@ class RaceCoreEnv:
         gate_forward = gate_rot.apply(np.array([1.0, 0.0, 0.0], dtype=np.float32))
         gate_lateral = gate_rot.apply(np.array([0.0, 1.0, 0.0], dtype=np.float32))
 
-        hover_center = gate_pos - 1.25 * gate_forward + 0.25 * np.array([0.0, 0.0, 1.0], dtype=np.float32)
+        hover_center = gate_pos - 1.25 * gate_forward
         hover_center = hover_center.reshape((1, 1, 3))
 
         keys = jax.random.split(key, 3)
-        along_track = jax.random.uniform(keys[0], (self.sim.n_worlds, 1, 1), minval=-0.20, maxval=0.20)
-        lateral = jax.random.uniform(keys[1], (self.sim.n_worlds, 1, 1), minval=-0.15, maxval=0.15)
-        vertical = jax.random.uniform(keys[2], (self.sim.n_worlds, 1, 1), minval=-0.05, maxval=0.05)
+        along_track = jax.random.uniform(keys[0], (self.sim.n_worlds, 1, 1), minval=-0.10, maxval=0.10)
+        lateral = jax.random.uniform(keys[1], (self.sim.n_worlds, 1, 1), minval=-0.05, maxval=0.05)
+        vertical = jax.random.uniform(keys[2], (self.sim.n_worlds, 1, 1), minval=-0.02, maxval=0.02)
         hover_pos = (
             hover_center
             - along_track * gate_forward.reshape((1, 1, 3))
@@ -631,6 +631,7 @@ class RaceCoreEnv:
         drone_pos: Array,
         drone_quat: Array,
         drone_vel: Array,
+        drone_ang_vel: Array,
         gate_pos: Array,
         gate_quat: Array,
         passed: Array,
@@ -642,58 +643,24 @@ class RaceCoreEnv:
     ) -> Array:
         """Compute the transition reward for the current step."""
         progress_reward_scale = 2.0
-        gate_pass_bonus = 50.0
-        finish_bonus = 200.0
-        speed_crossing_scale = 5.0
-        heading_alignment_scale = 0.3
-        crash_penalty = 10.0
+        gate_pass_bonus = 10.0
+        crash_penalty = 5.0
         step_penalty = 0.02
-        tilt_penalty_scale = 0.01
-        smoothness_penalty_scale = 0.005
-        target_offset = 0.0
-        absolute_dist_scale = 0.1
+        gate_height_penalty_scale = 0.5
 
-        gate_forward = RaceCoreEnv._quat_apply(
-            gate_quat,
-            jnp.broadcast_to(jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32), gate_pos.shape),
-        )
-        target_pos = gate_pos + target_offset * gate_forward
-        prev_target_dist = jnp.linalg.norm(last_drone_pos - target_pos, axis=-1)
-        curr_target_dist = jnp.linalg.norm(drone_pos - target_pos, axis=-1)
+        prev_target_dist = jnp.linalg.norm(last_drone_pos - gate_pos, axis=-1)
+        curr_target_dist = jnp.linalg.norm(drone_pos - gate_pos, axis=-1)
         progress_reward = progress_reward_scale * (prev_target_dist - curr_target_dist)
-
-        target_dir = target_pos - drone_pos
-        target_dir = target_dir / jnp.maximum(jnp.linalg.norm(target_dir, axis=-1, keepdims=True), 1e-6)
-        drone_forward = RaceCoreEnv._quat_apply(
-            drone_quat,
-            jnp.broadcast_to(jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32), drone_pos.shape),
-        )
-        heading_alignment = heading_alignment_scale * jnp.sum(drone_forward * target_dir, axis=-1)
-
-        world_up = jnp.broadcast_to(jnp.array([0.0, 0.0, 1.0], dtype=jnp.float32), drone_pos.shape)
-        drone_up = RaceCoreEnv._quat_apply(drone_quat, world_up)
-        tilt_penalty = tilt_penalty_scale * jnp.linalg.norm(drone_up[..., :2], axis=-1)
-
-        action_smoothness_penalty = smoothness_penalty_scale * jnp.mean(
-            (normalized_action - prev_action) ** 2, axis=-1
-        )
-        speed_at_crossing = speed_crossing_scale * jnp.linalg.norm(drone_vel, axis=-1) * passed.astype(jnp.float32)
+        gate_height_penalty = gate_height_penalty_scale * jnp.abs(drone_pos[..., 2] - gate_pos[..., 2])
 
         progress_reward = jnp.where(disabled_drones, 0.0, progress_reward)
-        heading_alignment = jnp.where(disabled_drones, 0.0, heading_alignment)
         newly_disabled = disabled_drones & ~prev_disabled_drones
-        absolute_dist = absolute_dist_scale * curr_target_dist
         return (
             progress_reward
-            + heading_alignment
             + gate_pass_bonus * passed.astype(jnp.float32)
-            + speed_at_crossing
-            + finish_bonus * course_complete.astype(jnp.float32)
             - crash_penalty * newly_disabled.astype(jnp.float32)
             - step_penalty
-            - tilt_penalty
-            - action_smoothness_penalty
-            - absolute_dist
+            - gate_height_penalty
         )
 
     @staticmethod
@@ -736,6 +703,7 @@ class RaceCoreEnv:
             drone_pos,
             drone_quat,
             drone_vel,
+            drone_ang_vel,
             gate_pos,
             gate_quat,
             passed,
