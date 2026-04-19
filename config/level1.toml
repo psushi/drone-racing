@@ -24,7 +24,7 @@ drone_model = "cf21B_500"                        # Model of the drone, i.e., cf2
     # For this batch of data, we split into num_minibatches and we update the agent's policy using gradient descent num_epoch times for each minibatch
 num_steps = 64
 num_minibatches = 8
-num_envs = 64
+num_envs = 32
 num_iterations = 1500
 gamma = 0.99
 lambda_ = 0.95

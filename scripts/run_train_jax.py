@@ -227,7 +227,7 @@ def run_train(
     config: str = "level1.toml",
     num_envs: int = 100,
     seed: int = 0,
-    checkpoint_path: str = "artifacts/policy_jax_full.msgpack",
+    checkpoint_path: str = "artifacts/policy_jax.msgpack",
     device: str = "auto",
 ) -> None:
     cfg = load_config(Path(__file__).parents[1] / "config" / config)

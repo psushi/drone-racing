@@ -22,7 +22,7 @@ classifiers = [
 ########################
 # Pip Dependencies
 ########################
-dependencies = ["fire >= 0.6.0", "numpy", "toml >= 0.10.2", "scipy", "rsl-rl-lib" , "flax", "distrax"]
+dependencies = ["fire >= 0.6.0", "numpy", "toml >= 0.10.2", "scipy", "flax", "distrax"]
 
 [project.optional-dependencies]
 # option[sim]: basic simulation
@@ -99,16 +99,9 @@ gpu = { features = ["sim", "gpu"], solve-group = "default" }
 sim = ".pixi/envs/default/bin/python scripts/sim.py"
 vsim = ".pixi/envs/default/bin/python scripts/vec_sim.py"
 deploy = ".pixi/envs/deploy/bin/python scripts/deploy.py"
-train = ".pixi/envs/default/bin/python scripts/run_vtrain.py"
-strain = ".pixi/envs/default/bin/python scripts/run_train.py"
-debug = ".pixi/envs/default/bin/python scripts/debug_reward.py"
-debug_att = ".pixi/envs/default/bin/python scripts/debug_reward_attitude.py"
-inspect = ".pixi/envs/default/bin/python scripts/inspect_env.py"
+debug = ".pixi/envs/default/bin/python scripts/debug_reward_attitude.py"
 watch = ".pixi/envs/default/bin/python scripts/watch_policy.py"
-watch_rsl = ".pixi/envs/default/bin/python scripts/watch_policy_rsl_rl.py"
-validate = ".pixi/envs/default/bin/python scripts/validate_attitude_actions.py"
-train_jax = ".pixi/envs/default/bin/python scripts/run_vtrain_jax_full.py"
-train_rsl = ".pixi/envs/default/bin/python scripts/run_train_rsl_rl.py"
+train = ".pixi/envs/default/bin/python scripts/run_train_jax.py"
 
 [tool.pixi.dependencies]
 openblas = ">=0.3.30,<0.4"

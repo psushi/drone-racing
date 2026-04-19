@@ -7,3 +7,7 @@ __pycache__/
 
 # Local Pixi environments
 .pixi/
+
+# Training artifacts and local notes
+artifacts/
+ideas.txt

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
+from types import MethodType
 
 import fire
 import gymnasium
@@ -15,7 +16,6 @@ from flax import serialization
 from gymnasium.wrappers.jax_to_numpy import JaxToNumpy
 
 import ece484_fly.envs  # noqa: F401
-from ece484_fly.envs.race_core import RaceCoreEnv
 from ece484_fly.envs.utils import gate_passed
 from ece484_fly.train import flatten_obs
 from ece484_fly.train.actor_critic_models import ActorCritic
@@ -34,112 +34,115 @@ def _quat_apply_np(quat: np.ndarray, vec: np.ndarray) -> np.ndarray:
     return vec + 2.0 * (q_w * uv + uuv)
 
 
-def _normalize_action_np(action: np.ndarray, action_low: np.ndarray, action_high: np.ndarray) -> np.ndarray:
-    return 2.0 * (action - action_low) / (action_high - action_low) - 1.0
+def _install_reset_shift(env, forward: float, lateral: float, vertical: float) -> None:
+    if not (forward or lateral or vertical):
+        return
+
+    base_env = env.unwrapped
+    original_sample_reset_state = base_env._sample_reset_state
+    gate_quat = np.asarray(base_env.gates["quat"][0], dtype=np.float32)
+    gate_forward = _quat_apply_np(gate_quat, np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    gate_lateral = _quat_apply_np(gate_quat, np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    world_up = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+
+    def shifted_reset_state(self, key):
+        reset_state = original_sample_reset_state(key)
+        if len(reset_state) == 3:
+            pos, quat, target_gate = reset_state
+        else:
+            pos, quat = reset_state
+            target_gate = None
+        offset = (
+            forward * gate_forward.reshape((1, 1, 3))
+            + lateral * gate_lateral.reshape((1, 1, 3))
+            + vertical * world_up.reshape((1, 1, 3))
+        )
+        if target_gate is None:
+            return pos + offset, quat
+        return pos + offset, quat, target_gate
+
+    base_env._sample_reset_state = MethodType(shifted_reset_state, base_env)
 
 
 def _reward_terms(
     last_pos: np.ndarray,
     pos: np.ndarray,
-    quat: np.ndarray,
-    vel: np.ndarray,
-    ang_vel: np.ndarray,
     gate_pos: np.ndarray,
-    gate_quat: np.ndarray,
     passed: bool,
-    course_complete: bool,
     disabled: bool,
     prev_disabled: bool,
-    normalized_action: np.ndarray,
-    prev_action: np.ndarray,
 ) -> dict[str, float]:
     progress_reward_scale = 2.0
-    gate_pass_bonus = 50.0
-    finish_bonus = 200.0
-    speed_crossing_scale = 5.0
-    heading_alignment_scale = 0.15
-    crash_penalty = 10.0
+    gate_pass_bonus = 10.0
+    crash_penalty = 5.0
     step_penalty = 0.02
-    tilt_penalty_scale = 0.05
-    ang_vel_penalty_scale = 0.02
-    smoothness_penalty_scale = 0.005
-    target_offset = 0.0
-    absolute_dist_scale = 0.2
-    gate_height_penalty_scale = 1.0
+    gate_height_penalty_scale = 0.5
 
-    gate_forward = _quat_apply_np(gate_quat, np.array([1.0, 0.0, 0.0], dtype=np.float32))
-    target_pos = gate_pos + target_offset * gate_forward
-    prev_target_dist = float(np.linalg.norm(last_pos - target_pos))
-    curr_target_dist = float(np.linalg.norm(pos - target_pos))
+    prev_target_dist = float(np.linalg.norm(last_pos - gate_pos))
+    curr_target_dist = float(np.linalg.norm(pos - gate_pos))
     progress_reward = progress_reward_scale * (prev_target_dist - curr_target_dist)
-
-    target_dir = target_pos - pos
-    target_dir = target_dir / max(float(np.linalg.norm(target_dir)), 1e-6)
-    drone_forward = _quat_apply_np(quat, np.array([1.0, 0.0, 0.0], dtype=np.float32))
-    heading_alignment = heading_alignment_scale * float(np.dot(drone_forward, target_dir))
-
-    drone_up = _quat_apply_np(quat, np.array([0.0, 0.0, 1.0], dtype=np.float32))
-    tilt_penalty = tilt_penalty_scale * float(np.linalg.norm(drone_up[:2]))
-    ang_vel_penalty = ang_vel_penalty_scale * float(np.linalg.norm(ang_vel))
-    action_smoothness_penalty = smoothness_penalty_scale * float(np.mean((normalized_action - prev_action) ** 2))
-    speed_at_crossing = speed_crossing_scale * float(np.linalg.norm(vel)) * float(passed)
     newly_disabled = float(bool(disabled and not prev_disabled))
-    absolute_dist = absolute_dist_scale * curr_target_dist
     gate_height_penalty = gate_height_penalty_scale * abs(float(pos[2] - gate_pos[2]))
 
     if disabled:
         progress_reward = 0.0
-        heading_alignment = 0.0
 
     total = (
         progress_reward
-        + heading_alignment
         + gate_pass_bonus * float(passed)
-        + speed_at_crossing
-        + finish_bonus * float(course_complete)
         - crash_penalty * newly_disabled
         - step_penalty
-        - tilt_penalty
-        - ang_vel_penalty
-        - action_smoothness_penalty
-        - absolute_dist
         - gate_height_penalty
     )
     return {
         "progress": progress_reward,
-        "heading": heading_alignment,
         "gate_bonus": gate_pass_bonus * float(passed),
-        "speed_crossing": speed_at_crossing,
-        "finish_bonus": finish_bonus * float(course_complete),
         "crash": -crash_penalty * newly_disabled,
         "step": -step_penalty,
-        "tilt": -tilt_penalty,
-        "ang_vel": -ang_vel_penalty,
-        "smoothness": -action_smoothness_penalty,
-        "absolute_dist": -absolute_dist,
         "gate_height": -gate_height_penalty,
         "total": total,
         "curr_target_dist": curr_target_dist,
-        "target_pos_z": float(target_pos[2]),
+        "target_pos_z": float(gate_pos[2]),
     }
 
 
 def debug_reward_attitude(
-    checkpoint_path: str = "artifacts/policy_jax_full.msgpack",
+    checkpoint_path: str = "artifacts/policy_jax.msgpack",
     config: str = "level1.toml",
     seed: int = 0,
     pause: bool = False,
     device: str = "auto",
     print_every: int = 5,
     render: bool = False,
+    gate_shift_x: float = 0.0,
+    gate_shift_y: float = 0.0,
+    gate_shift_z: float = 0.0,
+    reset_shift_forward: float = 0.0,
+    reset_shift_lateral: float = 0.0,
+    reset_shift_vertical: float = 0.0,
 ) -> None:
     cfg = load_config(Path(__file__).parents[1] / "config" / config)
     cfg.sim.render = render
     cfg.sim.pause = pause
     cfg.env.control_mode = "attitude"
+    if len(cfg.env.track.gates) > 0:
+        gate_cfg = cfg.env.track.gates[0]
+        gate0 = list(gate_cfg["pos"] if isinstance(gate_cfg, dict) else gate_cfg.pos)
+        gate0[0] += gate_shift_x
+        gate0[1] += gate_shift_y
+        gate0[2] += gate_shift_z
+        if isinstance(gate_cfg, dict):
+            gate_cfg["pos"] = gate0
+        else:
+            gate_cfg.pos = gate0
     device = select_device(device)
     print("JAX devices:", jax.devices())
     print("Using device:", device)
+    if gate_shift_x or gate_shift_y or gate_shift_z:
+        print(
+            "Shifted first gate by "
+            f"dx={gate_shift_x:+.3f}, dy={gate_shift_y:+.3f}, dz={gate_shift_z:+.3f}"
+        )
 
     env = gymnasium.make(
         cfg.env.id,
@@ -153,7 +156,14 @@ def debug_reward_attitude(
         seed=seed,
         device=device,
     )
+    _install_reset_shift(env, reset_shift_forward, reset_shift_lateral, reset_shift_vertical)
     env = JaxToNumpy(env)
+    if reset_shift_forward or reset_shift_lateral or reset_shift_vertical:
+        print(
+            "Shifted reset by "
+            f"forward={reset_shift_forward:+.3f}, lateral={reset_shift_lateral:+.3f}, "
+            f"vertical={reset_shift_vertical:+.3f}"
+        )
 
     model = ActorCritic(action_dim=4, hidden_dim=(128, 128), activation="tanh")
     dummy_params = model.init(jax.random.PRNGKey(seed), jnp.zeros((1, 22)))
@@ -162,7 +172,6 @@ def debug_reward_attitude(
     action_low = np.asarray(env.action_space.low, dtype=np.float32)
     action_high = np.asarray(env.action_space.high, dtype=np.float32)
     obs, _ = env.reset(seed=seed)
-    prev_action = np.zeros((4,), dtype=np.float32)
     prev_disabled = False
     last_pos = np.asarray(obs["pos"], dtype=np.float32).copy()
     step_idx = 0
@@ -173,7 +182,6 @@ def debug_reward_attitude(
             pi, _ = model.apply(params, jnp.asarray(policy_obs)[None, :])
             raw_action = np.asarray(pi.mean()[0], dtype=np.float32)
             applied_action = normalize_actions(raw_action, action_low, action_high)
-            normalized_action = _normalize_action_np(applied_action, action_low, action_high)
 
             target_gate = int(obs["target_gate"])
             gate_pos = np.asarray(obs["gates_pos"][target_gate], dtype=np.float32)
@@ -184,9 +192,7 @@ def debug_reward_attitude(
                 env.render()
 
             pos = np.asarray(obs["pos"], dtype=np.float32)
-            quat = np.asarray(obs["quat"], dtype=np.float32)
             vel = np.asarray(obs["vel"], dtype=np.float32)
-            ang_vel = np.asarray(obs["ang_vel"], dtype=np.float32)
             disabled = bool(terminated or truncated)
             next_target_gate = int(obs["target_gate"])
             passed = bool(
@@ -199,22 +205,14 @@ def debug_reward_attitude(
                     (0.45, 0.45),
                 )[0, 0]
             )
-            course_complete = next_target_gate == -1 and passed
 
             terms = _reward_terms(
                 last_pos,
                 pos,
-                quat,
-                vel,
-                ang_vel,
                 gate_pos,
-                gate_quat,
                 passed,
-                course_complete,
                 disabled,
                 prev_disabled,
-                normalized_action,
-                prev_action,
             )
 
             if step_idx % print_every == 0 or passed or disabled:
@@ -224,15 +222,11 @@ def debug_reward_attitude(
                 )
                 print(
                     "  "
-                    f"progress={terms['progress']:+.4f} heading={terms['heading']:+.4f} "
-                    f"gate={terms['gate_bonus']:+.1f} speed={terms['speed_crossing']:+.4f} "
-                    f"finish={terms['finish_bonus']:+.1f}"
+                    f"progress={terms['progress']:+.4f} gate={terms['gate_bonus']:+.1f}"
                 )
                 print(
                     "  "
                     f"crash={terms['crash']:+.1f} step={terms['step']:+.4f} "
-                    f"tilt={terms['tilt']:+.4f} ang_vel={terms['ang_vel']:+.4f} "
-                    f"smooth={terms['smoothness']:+.4f} abs={terms['absolute_dist']:+.4f} "
                     f"gate_h={terms['gate_height']:+.4f} total={terms['total']:+.4f}"
                 )
                 print(
@@ -249,13 +243,11 @@ def debug_reward_attitude(
             if disabled:
                 print("Episode ended, resetting.")
                 obs, _ = env.reset()
-                prev_action = np.zeros((4,), dtype=np.float32)
                 prev_disabled = False
                 last_pos = np.asarray(obs["pos"], dtype=np.float32).copy()
                 step_idx = 0
                 continue
 
-            prev_action = normalized_action
             prev_disabled = disabled
             last_pos = pos
             step_idx += 1

@@ -39,6 +39,60 @@ The drone must navigate through a series of gates while avoiding obstacles. The 
 
 > **macOS note**: Simulation is supported on macOS via CPU execution. GPU acceleration and hardware deployment workflows are Linux-only.
 
+## JAX Training
+
+This branch keeps one primary RL training path:
+
+- `scripts/run_train_jax.py`: main JAX PPO trainer
+- `ece484_fly/envs/jax_env.py`: functional JAX environment wrapper
+- `scripts/watch_policy.py`: render a saved checkpoint
+- `scripts/debug_reward_attitude.py`: inspect reward terms for a saved checkpoint
+
+Install the default environment once:
+
+```bash
+pixi install -e default
+```
+
+Run JAX training:
+
+```bash
+pixi run train
+```
+
+The trainer reads `config/level1.toml` and writes checkpoints to:
+
+```text
+artifacts/policy_jax.msgpack
+```
+
+Render the latest JAX checkpoint:
+
+```bash
+pixi run watch
+```
+
+Inspect reward terms while stepping the learned policy:
+
+```bash
+pixi run debug
+```
+
+The default training config is a moderate baseline:
+
+- `num_envs = 32`
+- `num_steps = 64`
+- `num_minibatches = 8`
+- `num_iterations = 1500`
+
+If you want to override the config or device from the CLI:
+
+```bash
+pixi run train --config level1.toml --device auto
+pixi run watch --checkpoint_path artifacts/policy_jax.msgpack
+pixi run debug --checkpoint_path artifacts/policy_jax.msgpack
+```
+
 ## Project Structure
 
 ```
@@ -46,12 +100,14 @@ ece484-fly/
 ├── ece484_fly/
 │   ├── control/          # Your controllers go here
 │   │   └── controller.py # Base Controller class (must inherit from this)
-│   ├── envs/             # Simulation environments (do not modify)
+│   ├── envs/             # Simulation environments and JAX wrappers
 │   └── utils/            # Utility functions
 ├── scripts/
 │   ├── sim.py            # Run simulation
-│   ├── deploy.py         # Deploy to hardware
-│   └── check_track.py    # Validate real track setup
+│   ├── run_train_jax.py  # Main JAX PPO trainer
+│   ├── watch_policy.py   # Render a saved policy checkpoint
+│   ├── debug_reward_attitude.py # Reward/debug viewer for a saved checkpoint
+│   └── deploy.py         # Deploy to hardware
 └── config/
     └── level1.toml       # Track and environment configuration
 ```
