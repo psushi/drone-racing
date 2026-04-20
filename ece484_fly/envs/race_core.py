@@ -775,7 +775,7 @@ class RaceCoreEnv:
         return (
             segment_progress
             + safety_weight * safety_reward
-            + gate_pass_bonus * passed.astype(jnp.float32)
+            # + gate_pass_bonus * passed.astype(jnp.float32)
             - ang_vel_penalty
             - vel_penalty
             - crash_penalty * newly_disabled.astype(jnp.float32)

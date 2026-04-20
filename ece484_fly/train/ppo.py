@@ -52,7 +52,7 @@ def compute_gae_jax(
         not_done = 1.0 - done_t.astype(jnp.float32)
         not_terminated = 1.0 - terminated_t.astype(jnp.float32)
         delta = reward_t + gamma * next_value_t * not_terminated - value_t
-        gae = delta + gamma * lambda_ * not_done * next_gae
+        gae = delta + gamma * lambda_ * not_terminated * next_gae
         return gae, gae
 
     init_carry = jnp.zeros_like(values[0])
