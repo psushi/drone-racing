@@ -17,7 +17,7 @@ from rich.table import Table
 
 from ece484_fly.envs.jax_env import FunctionalJaxVecDroneRaceEnv
 from ece484_fly.train.actor_critic_models import ActorCritic
-from ece484_fly.train.obs import flatten_obs_jax
+from ece484_fly.train.obs import POLICY_OBS_DIM, flatten_obs_jax
 from ece484_fly.train.ppo import compute_gae_jax, ppo_loss
 from ece484_fly.train.utils import select_device
 from ece484_fly.utils import load_config
@@ -250,7 +250,7 @@ def run_train(
     train_state = create_train_state(
         init_key,
         model,
-        obs_dim=22,
+        obs_dim=POLICY_OBS_DIM,
         lr=cfg.train.lr,
         max_grad_norm=cfg.train.max_grad_norm,
     )

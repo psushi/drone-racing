@@ -18,6 +18,7 @@ from gymnasium.wrappers.jax_to_numpy import JaxToNumpy
 import ece484_fly.envs  # noqa: F401
 from ece484_fly.train import flatten_obs
 from ece484_fly.train.actor_critic_models import ActorCritic
+from ece484_fly.train.obs import POLICY_OBS_DIM
 from ece484_fly.train.utils import normalize_actions, select_device
 from ece484_fly.utils import load_config
 
@@ -123,7 +124,7 @@ def watch_policy(
     action_high = np.asarray(env.action_space.high, dtype=np.float32)
     obs, info = env.reset(seed=seed)
     model = ActorCritic(action_dim=4, hidden_dim=(128, 128), activation="tanh")
-    dummy_params = model.init(jax.random.PRNGKey(seed), jnp.zeros((1, 22)))
+    dummy_params = model.init(jax.random.PRNGKey(seed), jnp.zeros((1, POLICY_OBS_DIM)))
     params = serialization.from_bytes(dummy_params, Path(checkpoint_path).read_bytes())
 
     episode = 0
