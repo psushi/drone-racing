@@ -413,7 +413,7 @@ class RaceCoreEnv:
         self.gates, self.obstacles, self.drone = load_track(track)
         # Randomize the track
         self.sim.data = self.sim.data.replace(core=self.sim.data.core.replace(rng_key=key))
-        reset_pos, reset_quat = self._sample_reset_state(subkey)
+        reset_pos, reset_quat, reset_target_gate = self._sample_reset_state(subkey)
 
         @jax.jit
         def update_sim_data(
@@ -439,40 +439,51 @@ class RaceCoreEnv:
 
         # Reset the environment data
         self.data = self._reset_env_data(
-            self.data, self.sim.data.states.pos, self.sim.mjx_data.mocap_pos, mask
+            self.data,
+            self.sim.data.states.pos,
+            self.sim.mjx_data.mocap_pos,
+            reset_target_gate[:, None],
+            mask,
         )
 
         return self.obs(), self.info()
 
-    def _sample_reset_state(self, key: jax.random.PRNGKey) -> tuple[Array, Array]:
-        """Sample a stable hover-like reset state facing the first target gate."""
-        gate_pos = np.asarray(self.gates["pos"][0], dtype=np.float32)
-        gate_quat = np.asarray(self.gates["quat"][0], dtype=np.float32)
-        gate_rot = R.from_quat(gate_quat)
-        gate_forward = gate_rot.apply(np.array([1.0, 0.0, 0.0], dtype=np.float32))
-        gate_lateral = gate_rot.apply(np.array([0.0, 1.0, 0.0], dtype=np.float32))
-
+    def _sample_reset_state(self, key: jax.random.PRNGKey) -> tuple[Array, Array, Array]:
+        """Sample hover-like reset states in front of randomly selected target gates."""
+        gate_pos = jnp.asarray(self.gates["pos"], dtype=jnp.float32)
+        gate_quat = jnp.asarray(self.gates["quat"], dtype=jnp.float32)
+        gate_forward = jax.vmap(self._quat_apply, in_axes=(0, 0))(
+            gate_quat,
+            jnp.broadcast_to(jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32), gate_pos.shape),
+        )
+        gate_lateral = jax.vmap(self._quat_apply, in_axes=(0, 0))(
+            gate_quat,
+            jnp.broadcast_to(jnp.array([0.0, 1.0, 0.0], dtype=jnp.float32), gate_pos.shape),
+        )
         hover_center = gate_pos - 1.25 * gate_forward
-        hover_center = hover_center.reshape((1, 1, 3))
 
-        keys = jax.random.split(key, 3)
+        keys = jax.random.split(key, 4)
+        reset_target_gate = jax.random.randint(
+            keys[3],
+            (self.sim.n_worlds,),
+            minval=0,
+            maxval=gate_pos.shape[0],
+        )
+        hover_center = hover_center[reset_target_gate][:, None, :]
+        gate_forward = gate_forward[reset_target_gate][:, None, :]
+        gate_lateral = gate_lateral[reset_target_gate][:, None, :]
+        gate_quat = gate_quat[reset_target_gate][:, None, :]
+
         along_track = jax.random.uniform(keys[0], (self.sim.n_worlds, 1, 1), minval=-0.10, maxval=0.10)
         lateral = jax.random.uniform(keys[1], (self.sim.n_worlds, 1, 1), minval=-0.05, maxval=0.05)
         vertical = jax.random.uniform(keys[2], (self.sim.n_worlds, 1, 1), minval=-0.02, maxval=0.02)
         hover_pos = (
             hover_center
-            - along_track * gate_forward.reshape((1, 1, 3))
-            + lateral * gate_lateral.reshape((1, 1, 3))
+            - along_track * gate_forward
+            + lateral * gate_lateral
             + vertical * np.array([0.0, 0.0, 1.0], dtype=np.float32).reshape((1, 1, 3))
         )
-        hover_quat = jax.device_put(
-            jnp.broadcast_to(
-                jnp.asarray(gate_quat, dtype=jnp.float32).reshape((1, 1, 4)),
-                (self.sim.n_worlds, self.sim.n_drones, 4),
-            ),
-            self.device,
-        )
-        return hover_pos, hover_quat
+        return hover_pos, gate_quat, reset_target_gate
 
     def _step(self, action: Array) -> tuple[dict[str, Array], float, bool, bool, dict]:
         """Step the firmware_wrapper class and its environment.
@@ -635,11 +646,15 @@ class RaceCoreEnv:
     @staticmethod
     @jax.jit
     def _reset_env_data(
-        data: EnvData, drone_pos: Array, mocap_pos: Array, mask: Array | None = None
+        data: EnvData,
+        drone_pos: Array,
+        mocap_pos: Array,
+        target_gate: Array,
+        mask: Array | None = None,
     ) -> EnvData:
         """Reset auxiliary variables of the environment data."""
         mask = jnp.ones(data.steps.shape, dtype=bool) if mask is None else mask
-        target_gate = jnp.where(mask[..., None], 0, data.target_gate)
+        target_gate = jnp.where(mask[..., None], target_gate, data.target_gate)
         last_drone_pos = jnp.where(mask[..., None, None], drone_pos, data.last_drone_pos)
         segment_start_pos = jnp.where(mask[..., None, None], drone_pos, data.segment_start_pos)
         disabled_drones = jnp.where(mask[..., None], False, data.disabled_drones)
