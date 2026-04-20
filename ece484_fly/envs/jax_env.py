@@ -132,6 +132,7 @@ class FunctionalJaxVecDroneRaceEnv:
         self._obstacle_nominal_pos = jnp.asarray(self.env.obstacles["nominal_pos"], dtype=jnp.float32)
         self._reset_gate_indices = jnp.asarray(self.env.reset_gate_indices, dtype=jnp.int32)
         self._reset_gate_probs = jnp.asarray(self.env.reset_gate_probs, dtype=jnp.float32)
+        self._reset_post_prev_prob = float(self.env.reset_post_prev_prob)
 
         # Precompute a near-gate hover reset frame for every gate.
         gate_pos = np.asarray(self.env.gates["pos"], dtype=np.float32)
@@ -156,14 +157,31 @@ class FunctionalJaxVecDroneRaceEnv:
         )
 
     def _sample_reset_state(self, key: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
-        keys = jax.random.split(key, 4)
+        keys = jax.random.split(key, 5)
         logits = jnp.log(self._reset_gate_probs)
         gate_choice = jax.random.categorical(keys[3], logits, shape=(self.num_envs,))
         reset_target_gate = self._reset_gate_indices[gate_choice]
-        reset_center = self._reset_center[reset_target_gate][:, None, :]
-        reset_forward = self._reset_forward[reset_target_gate][:, None, :]
-        reset_lateral = self._reset_lateral[reset_target_gate][:, None, :]
-        reset_quat = self._reset_gate_quat[reset_target_gate][:, None, :]
+        prev_gate = jnp.maximum(reset_target_gate - 1, 0)
+        use_post_prev = jax.random.bernoulli(
+            keys[4],
+            p=self._reset_post_prev_prob,
+            shape=(self.num_envs,),
+        ) & (reset_target_gate > 0)
+
+        pre_center = self._reset_center[reset_target_gate]
+        pre_forward = self._reset_forward[reset_target_gate]
+        pre_lateral = self._reset_lateral[reset_target_gate]
+        pre_quat = self._reset_gate_quat[reset_target_gate]
+
+        post_center = self._reset_center[prev_gate] + 1.25 * self._reset_forward[prev_gate] + 0.65 * self._reset_forward[prev_gate]
+        post_forward = self._reset_forward[prev_gate]
+        post_lateral = self._reset_lateral[prev_gate]
+        post_quat = self._reset_gate_quat[prev_gate]
+
+        reset_center = jnp.where(use_post_prev[:, None], post_center, pre_center)[:, None, :]
+        reset_forward = jnp.where(use_post_prev[:, None], post_forward, pre_forward)[:, None, :]
+        reset_lateral = jnp.where(use_post_prev[:, None], post_lateral, pre_lateral)[:, None, :]
+        reset_quat = jnp.where(use_post_prev[:, None], post_quat, pre_quat)[:, None, :]
         along_track = jax.random.uniform(keys[0], (self.num_envs, 1, 1), minval=-0.10, maxval=0.10)
         lateral = jax.random.uniform(keys[1], (self.num_envs, 1, 1), minval=-0.05, maxval=0.05)
         vertical = jax.random.uniform(keys[2], (self.num_envs, 1, 1), minval=-0.02, maxval=0.02)

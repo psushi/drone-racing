@@ -377,6 +377,10 @@ class RaceCoreEnv:
             gate_probs = gate_probs / prob_sum
         self.reset_gate_indices = gate_indices
         self.reset_gate_probs = gate_probs
+        post_prev_prob = float(reset_cfg.get("post_prev_prob", 0.5))
+        if not 0.0 <= post_prev_prob <= 1.0:
+            raise ValueError("reset_config.post_prev_prob must be in [0, 1]")
+        self.reset_post_prev_prob = post_prev_prob
 
         # Load the track into the simulation and compile the reset and step functions with hooks
         self._setup_sim(randomizations)
@@ -472,7 +476,7 @@ class RaceCoreEnv:
         return self.obs(), self.info()
 
     def _sample_reset_state(self, key: jax.random.PRNGKey) -> tuple[Array, Array, Array]:
-        """Sample hover-like reset states in front of randomly selected target gates."""
+        """Sample hover-like reset states before the target gate or just after the previous gate."""
         gate_pos = jnp.asarray(self.gates["pos"], dtype=jnp.float32)
         gate_quat = jnp.asarray(self.gates["quat"], dtype=jnp.float32)
         gate_forward = jax.vmap(self._quat_apply, in_axes=(0, 0))(
@@ -485,7 +489,7 @@ class RaceCoreEnv:
         )
         hover_center = gate_pos - 1.25 * gate_forward
 
-        keys = jax.random.split(key, 4)
+        keys = jax.random.split(key, 5)
         reset_gate_indices = jnp.asarray(self.reset_gate_indices, dtype=jnp.int32)
         reset_gate_probs = jnp.asarray(self.reset_gate_probs, dtype=jnp.float32)
         gate_choice = jax.random.categorical(
@@ -494,10 +498,27 @@ class RaceCoreEnv:
             shape=(self.sim.n_worlds,),
         )
         reset_target_gate = reset_gate_indices[gate_choice]
-        hover_center = hover_center[reset_target_gate][:, None, :]
-        gate_forward = gate_forward[reset_target_gate][:, None, :]
-        gate_lateral = gate_lateral[reset_target_gate][:, None, :]
-        gate_quat = gate_quat[reset_target_gate][:, None, :]
+        prev_gate = jnp.maximum(reset_target_gate - 1, 0)
+        use_post_prev = jax.random.bernoulli(
+            keys[4],
+            p=self.reset_post_prev_prob,
+            shape=(self.sim.n_worlds,),
+        ) & (reset_target_gate > 0)
+
+        pre_center = hover_center[reset_target_gate]
+        pre_forward = gate_forward[reset_target_gate]
+        pre_lateral = gate_lateral[reset_target_gate]
+        pre_quat = gate_quat[reset_target_gate]
+
+        post_center = gate_pos[prev_gate] + 0.65 * gate_forward[prev_gate]
+        post_forward = gate_forward[prev_gate]
+        post_lateral = gate_lateral[prev_gate]
+        post_quat = gate_quat[prev_gate]
+
+        hover_center = jnp.where(use_post_prev[:, None], post_center, pre_center)[:, None, :]
+        gate_forward = jnp.where(use_post_prev[:, None], post_forward, pre_forward)[:, None, :]
+        gate_lateral = jnp.where(use_post_prev[:, None], post_lateral, pre_lateral)[:, None, :]
+        gate_quat = jnp.where(use_post_prev[:, None], post_quat, pre_quat)[:, None, :]
 
         along_track = jax.random.uniform(keys[0], (self.sim.n_worlds, 1, 1), minval=-0.10, maxval=0.10)
         lateral = jax.random.uniform(keys[1], (self.sim.n_worlds, 1, 1), minval=-0.05, maxval=0.05)
