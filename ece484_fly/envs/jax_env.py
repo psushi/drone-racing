@@ -56,6 +56,7 @@ class JaxVecDroneRaceEnv:
             disturbances=cfg.env.get("disturbances"),
             randomizations=cfg.env.get("randomizations"),
             reward_config=cfg.env.get("reward"),
+            reset_config=cfg.env.get("reset"),
             seed=seed,
             device=device,
         )
@@ -109,6 +110,7 @@ class FunctionalJaxVecDroneRaceEnv:
             disturbances=cfg.env.get("disturbances"),
             randomizations=cfg.env.get("randomizations"),
             reward_config=cfg.env.get("reward"),
+            reset_config=cfg.env.get("reset"),
             seed=seed,
             device=device,
         )
@@ -128,6 +130,8 @@ class FunctionalJaxVecDroneRaceEnv:
         self._gate_nominal_pos = jnp.asarray(self.env.gates["nominal_pos"], dtype=jnp.float32)
         self._gate_nominal_quat = jnp.asarray(self.env.gates["nominal_quat"], dtype=jnp.float32)
         self._obstacle_nominal_pos = jnp.asarray(self.env.obstacles["nominal_pos"], dtype=jnp.float32)
+        self._reset_gate_indices = jnp.asarray(self.env.reset_gate_indices, dtype=jnp.int32)
+        self._reset_gate_probs = jnp.asarray(self.env.reset_gate_probs, dtype=jnp.float32)
 
         # Precompute a near-gate hover reset frame for every gate.
         gate_pos = np.asarray(self.env.gates["pos"], dtype=np.float32)
@@ -153,12 +157,9 @@ class FunctionalJaxVecDroneRaceEnv:
 
     def _sample_reset_state(self, key: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
         keys = jax.random.split(key, 4)
-        reset_target_gate = jax.random.randint(
-            keys[3],
-            (self.num_envs,),
-            minval=0,
-            maxval=self._reset_center.shape[0],
-        )
+        logits = jnp.log(self._reset_gate_probs)
+        gate_choice = jax.random.categorical(keys[3], logits, shape=(self.num_envs,))
+        reset_target_gate = self._reset_gate_indices[gate_choice]
         reset_center = self._reset_center[reset_target_gate][:, None, :]
         reset_forward = self._reset_forward[reset_target_gate][:, None, :]
         reset_lateral = self._reset_lateral[reset_target_gate][:, None, :]

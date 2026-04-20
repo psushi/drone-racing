@@ -279,6 +279,7 @@ class RaceCoreEnv:
         disturbances: ConfigDict | None = None,
         randomizations: ConfigDict | None = None,
         reward_config: ConfigDict | None = None,
+        reset_config: ConfigDict | None = None,
         seed: str | int = "random",
         max_episode_steps: int = 1500,
         device: Literal["cpu", "gpu"] = "cpu",
@@ -296,6 +297,7 @@ class RaceCoreEnv:
             disturbances: Disturbance configuration.
             randomizations: Randomization configuration.
             reward_config: Reward shaping configuration.
+            reset_config: Reset-state sampling configuration.
             seed: "random" for a generated seed or the random seed directly.
             max_episode_steps: Maximum number of steps per episode. Needs to be tracked manually for
                 vectorized environments.
@@ -354,6 +356,27 @@ class RaceCoreEnv:
             "gate_pass_bonus": float(reward_cfg.get("gate_pass_bonus", 5.0)),
             "vel_penalty_scale": float(reward_cfg.get("vel_penalty_scale", 0.01)),
         }
+        reset_cfg = {} if reset_config is None else reset_config
+        n_gates_total = len(track.gates)
+        gate_indices = reset_cfg.get("gate_indices", list(range(n_gates_total)))
+        if len(gate_indices) == 0:
+            raise ValueError("reset_config.gate_indices must not be empty")
+        gate_indices = np.asarray(gate_indices, dtype=np.int32)
+        if np.any(gate_indices < 0) or np.any(gate_indices >= n_gates_total):
+            raise ValueError("reset_config.gate_indices contains out-of-range gate ids")
+        gate_probs = reset_cfg.get("gate_probs")
+        if gate_probs is None:
+            gate_probs = np.ones(len(gate_indices), dtype=np.float32) / len(gate_indices)
+        else:
+            gate_probs = np.asarray(gate_probs, dtype=np.float32)
+            if gate_probs.shape != gate_indices.shape:
+                raise ValueError("reset_config.gate_probs must match gate_indices length")
+            prob_sum = float(gate_probs.sum())
+            if prob_sum <= 0.0:
+                raise ValueError("reset_config.gate_probs must sum to a positive value")
+            gate_probs = gate_probs / prob_sum
+        self.reset_gate_indices = gate_indices
+        self.reset_gate_probs = gate_probs
 
         # Load the track into the simulation and compile the reset and step functions with hooks
         self._setup_sim(randomizations)
@@ -463,12 +486,14 @@ class RaceCoreEnv:
         hover_center = gate_pos - 1.25 * gate_forward
 
         keys = jax.random.split(key, 4)
-        reset_target_gate = jax.random.randint(
+        reset_gate_indices = jnp.asarray(self.reset_gate_indices, dtype=jnp.int32)
+        reset_gate_probs = jnp.asarray(self.reset_gate_probs, dtype=jnp.float32)
+        gate_choice = jax.random.categorical(
             keys[3],
-            (self.sim.n_worlds,),
-            minval=0,
-            maxval=gate_pos.shape[0],
+            jnp.log(reset_gate_probs),
+            shape=(self.sim.n_worlds,),
         )
+        reset_target_gate = reset_gate_indices[gate_choice]
         hover_center = hover_center[reset_target_gate][:, None, :]
         gate_forward = gate_forward[reset_target_gate][:, None, :]
         gate_lateral = gate_lateral[reset_target_gate][:, None, :]

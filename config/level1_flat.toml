@@ -53,6 +53,10 @@ crash_penalty = 5.0
 gate_pass_bonus = 5.0
 vel_penalty_scale = 0.01
 
+[env.reset]
+gate_indices = [0, 1, 2, 3]
+gate_probs = [0.45, 0.30, 0.17, 0.08]
+
 [env.track]
 randomize = false
 

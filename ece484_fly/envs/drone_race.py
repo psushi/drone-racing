@@ -34,6 +34,7 @@ class DroneRaceEnv(RaceCoreEnv, Env):
         disturbances: ConfigDict | None = None,
         randomizations: ConfigDict | None = None,
         reward_config: ConfigDict | None = None,
+        reset_config: ConfigDict | None = None,
         seed: str | int = "random",
         max_episode_steps: int = 1500,
         device: Literal["cpu", "gpu"] = "cpu",
@@ -49,6 +50,7 @@ class DroneRaceEnv(RaceCoreEnv, Env):
             disturbances: Disturbance configuration.
             randomizations: Randomization configuration.
             reward_config: Reward shaping configuration.
+            reset_config: Reset-state sampling configuration.
             seed: "random" for a generated seed or the random seed directly.
             max_episode_steps: Maximum number of steps per episode.
             device: Device used for the environment and the simulation.
@@ -64,6 +66,7 @@ class DroneRaceEnv(RaceCoreEnv, Env):
             disturbances=disturbances,
             randomizations=randomizations,
             reward_config=reward_config,
+            reset_config=reset_config,
             seed=seed,
             max_episode_steps=max_episode_steps,
             device=device,
@@ -119,6 +122,7 @@ class VecDroneRaceEnv(RaceCoreEnv, VectorEnv):
         disturbances: ConfigDict | None = None,
         randomizations: ConfigDict | None = None,
         reward_config: ConfigDict | None = None,
+        reset_config: ConfigDict | None = None,
         seed: int = 1337,
         max_episode_steps: int = 1500,
         device: Literal["cpu", "gpu"] = "cpu",
@@ -135,6 +139,7 @@ class VecDroneRaceEnv(RaceCoreEnv, VectorEnv):
             disturbances: Disturbance configuration.
             randomizations: Randomization configuration.
             reward_config: Reward shaping configuration.
+            reset_config: Reset-state sampling configuration.
             seed: Random seed.
             max_episode_steps: Maximum number of steps per episode.
             device: Device used for the environment and the simulation.
@@ -150,6 +155,7 @@ class VecDroneRaceEnv(RaceCoreEnv, VectorEnv):
             disturbances=disturbances,
             randomizations=randomizations,
             reward_config=reward_config,
+            reset_config=reset_config,
             seed=seed,
             max_episode_steps=max_episode_steps,
             device=device,
