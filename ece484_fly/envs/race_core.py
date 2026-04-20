@@ -91,6 +91,7 @@ class EnvData:
     gates_visited: Array
     obstacles_visited: Array
     last_drone_pos: Array
+    segment_start_pos: Array
     marked_for_reset: Array
     disabled_drones: Array
     steps: Array
@@ -104,6 +105,13 @@ class EnvData:
     max_episode_steps: Array
     sensor_range: Array
     rewards: Array
+    progress_scale: Array
+    safety_weight: Array
+    ang_vel_penalty_scale: Array
+    gate_width: Array
+    safety_activation_distance: Array
+    crash_penalty: Array
+    gate_pass_bonus: Array
 
     @classmethod
     def create(
@@ -119,6 +127,13 @@ class EnvData:
         sensor_range: float,
         pos_limit_low: Array,
         pos_limit_high: Array,
+        progress_scale: float,
+        safety_weight: float,
+        ang_vel_penalty_scale: float,
+        gate_width: float,
+        safety_activation_distance: float,
+        crash_penalty: float,
+        gate_pass_bonus: float,
         device: Device,
     ) -> EnvData:
         """Create a new environment data struct with default values."""
@@ -127,6 +142,7 @@ class EnvData:
             gates_visited=jnp.zeros((n_envs, n_drones, n_gates), dtype=bool, device=device),
             obstacles_visited=jnp.zeros((n_envs, n_drones, n_obstacles), dtype=bool, device=device),
             last_drone_pos=jnp.zeros((n_envs, n_drones, 3), dtype=np.float32, device=device),
+            segment_start_pos=jnp.zeros((n_envs, n_drones, 3), dtype=np.float32, device=device),
             marked_for_reset=jnp.zeros(n_envs, dtype=bool, device=device),
             disabled_drones=jnp.zeros((n_envs, n_drones), dtype=bool, device=device),
             contact_masks=jnp.array(contact_masks, dtype=bool, device=device),
@@ -139,6 +155,17 @@ class EnvData:
             max_episode_steps=jnp.array([max_episode_steps], dtype=int, device=device),
             sensor_range=jnp.array([sensor_range], dtype=jnp.float32, device=device),
             rewards=jnp.zeros((n_envs, n_drones), dtype=jnp.float32, device=device),
+            progress_scale=jnp.array([progress_scale], dtype=jnp.float32, device=device),
+            safety_weight=jnp.array([safety_weight], dtype=jnp.float32, device=device),
+            ang_vel_penalty_scale=jnp.array(
+                [ang_vel_penalty_scale], dtype=jnp.float32, device=device
+            ),
+            gate_width=jnp.array([gate_width], dtype=jnp.float32, device=device),
+            safety_activation_distance=jnp.array(
+                [safety_activation_distance], dtype=jnp.float32, device=device
+            ),
+            crash_penalty=jnp.array([crash_penalty], dtype=jnp.float32, device=device),
+            gate_pass_bonus=jnp.array([gate_pass_bonus], dtype=jnp.float32, device=device),
         )
 
 
@@ -248,6 +275,7 @@ class RaceCoreEnv:
         control_mode: Literal["state", "attitude"] = "state",
         disturbances: ConfigDict | None = None,
         randomizations: ConfigDict | None = None,
+        reward_config: ConfigDict | None = None,
         seed: str | int = "random",
         max_episode_steps: int = 1500,
         device: Literal["cpu", "gpu"] = "cpu",
@@ -264,6 +292,7 @@ class RaceCoreEnv:
             track: Track configuration.
             disturbances: Disturbance configuration.
             randomizations: Randomization configuration.
+            reward_config: Reward shaping configuration.
             seed: "random" for a generated seed or the random seed directly.
             max_episode_steps: Maximum number of steps per episode. Needs to be tracked manually for
                 vectorized environments.
@@ -309,6 +338,18 @@ class RaceCoreEnv:
         self.disturbances = {mode: rng_spec2fn(spec) for mode, spec in specs.items()}
         specs = {} if randomizations is None else randomizations
         randomizations = {mode: rng_spec2fn(spec) for mode, spec in specs.items()}
+        reward_cfg = {} if reward_config is None else reward_config
+        self.reward_config = {
+            "progress_scale": float(reward_cfg.get("progress_scale", 10.0)),
+            "safety_weight": float(reward_cfg.get("safety_weight", 1.0)),
+            "ang_vel_penalty_scale": float(reward_cfg.get("ang_vel_penalty_scale", 0.01)),
+            "gate_width": float(reward_cfg.get("gate_width", 0.4)),
+            "safety_activation_distance": float(
+                reward_cfg.get("safety_activation_distance", 2.5)
+            ),
+            "crash_penalty": float(reward_cfg.get("crash_penalty", 5.0)),
+            "gate_pass_bonus": float(reward_cfg.get("gate_pass_bonus", 5.0)),
+        }
 
         # Load the track into the simulation and compile the reset and step functions with hooks
         self._setup_sim(randomizations)
@@ -331,6 +372,13 @@ class RaceCoreEnv:
             sensor_range=sensor_range,
             pos_limit_low=[-3, -3, -1e-3],
             pos_limit_high=[3, 3, 2.5],
+            progress_scale=self.reward_config["progress_scale"],
+            safety_weight=self.reward_config["safety_weight"],
+            ang_vel_penalty_scale=self.reward_config["ang_vel_penalty_scale"],
+            gate_width=self.reward_config["gate_width"],
+            safety_activation_distance=self.reward_config["safety_activation_distance"],
+            crash_penalty=self.reward_config["crash_penalty"],
+            gate_pass_bonus=self.reward_config["gate_pass_bonus"],
             device=self.device,
         )
         self.randomize_track = build_track_randomization_fn(randomizations, gate_ids, obstacle_ids)
@@ -588,6 +636,7 @@ class RaceCoreEnv:
         mask = jnp.ones(data.steps.shape, dtype=bool) if mask is None else mask
         target_gate = jnp.where(mask[..., None], 0, data.target_gate)
         last_drone_pos = jnp.where(mask[..., None, None], drone_pos, data.last_drone_pos)
+        segment_start_pos = jnp.where(mask[..., None, None], drone_pos, data.segment_start_pos)
         disabled_drones = jnp.where(mask[..., None], False, data.disabled_drones)
         steps = jnp.where(mask, 0, data.steps)
         last_action = jnp.where(mask[..., None, None], 0.0, data.last_action)
@@ -606,6 +655,7 @@ class RaceCoreEnv:
         return data.replace(
             target_gate=target_gate,
             last_drone_pos=last_drone_pos,
+            segment_start_pos=segment_start_pos,
             disabled_drones=disabled_drones,
             gates_visited=gates_visited,
             obstacles_visited=obstacles_visited,
@@ -627,6 +677,7 @@ class RaceCoreEnv:
     @staticmethod
     @jax.jit
     def _compute_reward(
+        segment_start_pos: Array,
         last_drone_pos: Array,
         drone_pos: Array,
         drone_quat: Array,
@@ -640,27 +691,46 @@ class RaceCoreEnv:
         prev_disabled_drones: Array,
         normalized_action: Array,
         prev_action: Array,
+        progress_scale: Array,
+        safety_weight: Array,
+        ang_vel_penalty_scale: Array,
+        gate_width: Array,
+        safety_activation_distance: Array,
+        crash_penalty: Array,
+        gate_pass_bonus: Array,
     ) -> Array:
         """Compute the transition reward for the current step."""
-        progress_reward_scale = 2.0
-        gate_pass_bonus = 10.0
-        crash_penalty = 5.0
-        step_penalty = 0.02
-        gate_height_penalty_scale = 0.5
+        segment_dir = gate_pos - segment_start_pos
+        segment_dir_norm = jnp.linalg.norm(segment_dir, axis=-1, keepdims=True)
+        safe_segment_dir = segment_dir / jnp.maximum(segment_dir_norm, 1e-6)
+        s_prev = jnp.sum((last_drone_pos - segment_start_pos) * safe_segment_dir, axis=-1)
+        s_curr = jnp.sum((drone_pos - segment_start_pos) * safe_segment_dir, axis=-1)
+        segment_progress = progress_scale * (s_curr - s_prev)
 
-        prev_target_dist = jnp.linalg.norm(last_drone_pos - gate_pos, axis=-1)
-        curr_target_dist = jnp.linalg.norm(drone_pos - gate_pos, axis=-1)
-        progress_reward = progress_reward_scale * (prev_target_dist - curr_target_dist)
-        gate_height_penalty = gate_height_penalty_scale * jnp.abs(drone_pos[..., 2] - gate_pos[..., 2])
+        gate_normal = RaceCoreEnv._quat_apply(
+            gate_quat,
+            jnp.broadcast_to(jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32), gate_pos.shape),
+        )
+        rel_gate = drone_pos - gate_pos
+        plane_distance = jnp.abs(jnp.sum(rel_gate * gate_normal, axis=-1))
+        lateral_offset = jnp.linalg.norm(
+            rel_gate - jnp.sum(rel_gate * gate_normal, axis=-1, keepdims=True) * gate_normal,
+            axis=-1,
+        )
+        f = jnp.maximum(1.0 - plane_distance / safety_activation_distance, 0.0)
+        v = jnp.maximum((1.0 - f) * (gate_width / 6.0), 0.05)
+        safety_reward = -f * (1.0 - jnp.exp(-0.5 * (lateral_offset**2) / v))
+        ang_vel_penalty = ang_vel_penalty_scale * jnp.linalg.norm(drone_ang_vel, axis=-1)
 
-        progress_reward = jnp.where(disabled_drones, 0.0, progress_reward)
+        segment_progress = jnp.where(disabled_drones, 0.0, segment_progress)
+        safety_reward = jnp.where(disabled_drones, 0.0, safety_reward)
         newly_disabled = disabled_drones & ~prev_disabled_drones
         return (
-            progress_reward
+            segment_progress
+            + safety_weight * safety_reward
             + gate_pass_bonus * passed.astype(jnp.float32)
+            - ang_vel_penalty
             - crash_penalty * newly_disabled.astype(jnp.float32)
-            - step_penalty
-            - gate_height_penalty
         )
 
     @staticmethod
@@ -699,6 +769,7 @@ class RaceCoreEnv:
         passed = gate_passed(drone_pos, data.last_drone_pos, gate_pos, gate_quat, (0.45, 0.45))
         course_complete = passed & (data.target_gate == (n_gates - 1))
         rewards = RaceCoreEnv._compute_reward(
+            data.segment_start_pos,
             data.last_drone_pos,
             drone_pos,
             drone_quat,
@@ -712,10 +783,18 @@ class RaceCoreEnv:
             data.disabled_drones,
             normalized_action,
             data.last_action,
+            data.progress_scale,
+            data.safety_weight,
+            data.ang_vel_penalty_scale,
+            data.gate_width,
+            data.safety_activation_distance,
+            data.crash_penalty,
+            data.gate_pass_bonus,
         )
         # Update the target gate index. Increment by one if drones have passed a gate
         target_gate = data.target_gate + passed * ~disabled_drones
         target_gate = jnp.where(target_gate >= n_gates, -1, target_gate)
+        segment_start_pos = jnp.where(passed[..., None], gate_pos, data.segment_start_pos)
         steps = data.steps + 1
         truncated = steps >= data.max_episode_steps
         marked_for_reset = jnp.all(disabled_drones | truncated[..., None], axis=-1)
@@ -727,6 +806,7 @@ class RaceCoreEnv:
         obstacles_visited = data.obstacles_visited | (jnp.linalg.norm(dpos, axis=-1) < sensor_range)
         data = data.replace(
             last_drone_pos=drone_pos,
+            segment_start_pos=segment_start_pos,
             target_gate=target_gate,
             disabled_drones=disabled_drones,
             marked_for_reset=marked_for_reset,

@@ -108,6 +108,7 @@ def watch_policy(
         track=cfg.env.track,
         disturbances=cfg.env.get("disturbances"),
         randomizations=cfg.env.get("randomizations"),
+        reward_config=cfg.env.get("reward"),
         seed=seed,
         device=device,
     )

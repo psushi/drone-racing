@@ -55,6 +55,7 @@ class JaxVecDroneRaceEnv:
             track=cfg.env.track,
             disturbances=cfg.env.get("disturbances"),
             randomizations=cfg.env.get("randomizations"),
+            reward_config=cfg.env.get("reward"),
             seed=seed,
             device=device,
         )
@@ -107,6 +108,7 @@ class FunctionalJaxVecDroneRaceEnv:
             track=cfg.env.track,
             disturbances=cfg.env.get("disturbances"),
             randomizations=cfg.env.get("randomizations"),
+            reward_config=cfg.env.get("reward"),
             seed=seed,
             device=device,
         )
@@ -305,6 +307,7 @@ class FunctionalJaxVecDroneRaceEnv:
                 mjx_data=mjx_data,
                 env_data=env_data,
             )
+            final_obs = self._observe(next_state)
             if self.env.autoreset:
                 next_state = self._reset_subset(
                     next_state.sim_data,
@@ -313,7 +316,7 @@ class FunctionalJaxVecDroneRaceEnv:
                     next_state.env_data.marked_for_reset,
                 )
             obs = self._observe(next_state)
-            info = {"passed": passed[:, 0]}
+            info = {"passed": passed[:, 0], "final_observation": final_obs}
             return next_state, obs, reward, terminated, truncated, info
 
         return step_fn
@@ -353,6 +356,7 @@ class JaxDroneRaceEnv:
             track=cfg.env.track,
             disturbances=cfg.env.get("disturbances"),
             randomizations=cfg.env.get("randomizations"),
+            reward_config=cfg.env.get("reward"),
             seed=seed,
             device=device,
         )

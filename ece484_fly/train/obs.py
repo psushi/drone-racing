@@ -9,6 +9,11 @@ POLICY_OBS_DIM = 27
 [body_vel(3), body_rates(3), rotation_matrix(9), target_gate_encoding(6), next_gate_encoding(6)]
 """
 
+BODY_VEL_SCALE = 5.0
+BODY_RATE_SCALE = 6.0
+GATE_RADIUS_SCALE = 3.0
+OBS_CLIP = 5.0
+
 
 def encode_gate_pos(rel_pos: np.ndarray, gate_normal: np.ndarray, epsilon: float = 1e-6) -> np.ndarray:
     """in spherical coordinates, r, sin(theta), cos(theta), sin(phi), cos(phi), cos(alpha)"""
@@ -33,6 +38,18 @@ def encode_gate_pos(rel_pos: np.ndarray, gate_normal: np.ndarray, epsilon: float
         features[zero_mask] = np.array([0.0, 0.0, 1.0, 0.0, 1.0, 1.0], dtype=np.float32)
 
     return features
+
+
+def _normalize_gate_encoding_np(features: np.ndarray) -> np.ndarray:
+    features = features.copy()
+    features[..., 0] = features[..., 0] / GATE_RADIUS_SCALE
+    return np.clip(features, -OBS_CLIP, OBS_CLIP)
+
+
+def _normalize_kinematics_np(body_vel: np.ndarray, body_rates: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    body_vel = np.clip(body_vel / BODY_VEL_SCALE, -OBS_CLIP, OBS_CLIP)
+    body_rates = np.clip(body_rates / BODY_RATE_SCALE, -OBS_CLIP, OBS_CLIP)
+    return body_vel, body_rates
 
 
 
@@ -101,6 +118,7 @@ def flatten_obs(observations: dict, vectorized: bool) -> np.ndarray:
     # Drone vel and orientation in body frame.
     body_vel = R_bw.apply(world_vel) # (OBS), (N,3)
     body_rates = R_bw.apply(world_ang_vel) # (OBS), (N,3)
+    body_vel, body_rates = _normalize_kinematics_np(body_vel, body_rates)
     rotation_matrix = R_wb.as_matrix().reshape(N,9) # (OBS) (N, 9)
 
 
@@ -111,6 +129,7 @@ def flatten_obs(observations: dict, vectorized: bool) -> np.ndarray:
     rel_body_gate_pos = R_bw.apply(target_pos - pos) # (N,3) (OBS)
     gate_normal_body = R_bw.apply(gate_normal) # (N, 3)
     target_encoding = encode_gate_pos(rel_body_gate_pos, gate_normal_body, epsilon=1e-6) # (N,6)
+    target_encoding = _normalize_gate_encoding_np(target_encoding)
 
 
     # Next target gate
@@ -121,6 +140,7 @@ def flatten_obs(observations: dict, vectorized: bool) -> np.ndarray:
     next_target_pos = rotation.apply(next_target_pos - target_pos) # (N,3)
     next_gate_normal_target = rotation.apply(next_gate_normal) # (N,3)
     next_target_encoding = encode_gate_pos(next_target_pos, next_gate_normal_target, epsilon=1e-6) # (N,6)
+    next_target_encoding = _normalize_gate_encoding_np(next_target_encoding)
 
 
 
@@ -188,6 +208,18 @@ def encode_gate_pos_jax(
     return jnp.where(zero_mask[..., None], default_features, features)
 
 
+def _normalize_gate_encoding_jax(features: jax.Array) -> jax.Array:
+    radius = features[..., :1] / GATE_RADIUS_SCALE
+    angles = features[..., 1:]
+    return jnp.clip(jnp.concatenate([radius, angles], axis=-1), -OBS_CLIP, OBS_CLIP)
+
+
+def _normalize_kinematics_jax(body_vel: jax.Array, body_rates: jax.Array) -> tuple[jax.Array, jax.Array]:
+    body_vel = jnp.clip(body_vel / BODY_VEL_SCALE, -OBS_CLIP, OBS_CLIP)
+    body_rates = jnp.clip(body_rates / BODY_RATE_SCALE, -OBS_CLIP, OBS_CLIP)
+    return body_vel, body_rates
+
+
 def flatten_obs_jax(observations: dict[str, jax.Array], vectorized: bool) -> jax.Array:
     """JAX-native version of ``flatten_obs`` suitable for JIT/scans.
 
@@ -217,6 +249,7 @@ def flatten_obs_jax(observations: dict[str, jax.Array], vectorized: bool) -> jax
     r_bw = _quat_conjugate_jax(world_quat)
     body_vel = _quat_apply_jax(r_bw, world_vel)
     body_rates = _quat_apply_jax(r_bw, world_ang_vel)
+    body_vel, body_rates = _normalize_kinematics_jax(body_vel, body_rates)
     rotation_matrix = _quat_to_rotmat_jax(world_quat)
 
     target_pos = gates_pos[batch_idx, target_gates]
@@ -227,7 +260,9 @@ def flatten_obs_jax(observations: dict[str, jax.Array], vectorized: bool) -> jax
     )
     rel_body_gate_pos = _quat_apply_jax(r_bw, target_pos - pos)
     target_gate_normal_body = _quat_apply_jax(r_bw, target_gate_normal_world)
-    target_encoding = encode_gate_pos_jax(rel_body_gate_pos, target_gate_normal_body)
+    target_encoding = _normalize_gate_encoding_jax(
+        encode_gate_pos_jax(rel_body_gate_pos, target_gate_normal_body)
+    )
 
     target_gate_inv = _quat_conjugate_jax(target_gate_quat)
     next_target_pos = gates_pos[batch_idx, next_target_gates]
@@ -238,7 +273,9 @@ def flatten_obs_jax(observations: dict[str, jax.Array], vectorized: bool) -> jax
     )
     next_target_rel = _quat_apply_jax(target_gate_inv, next_target_pos - target_pos)
     next_gate_normal_target = _quat_apply_jax(target_gate_inv, next_gate_normal_world)
-    next_target_encoding = encode_gate_pos_jax(next_target_rel, next_gate_normal_target)
+    next_target_encoding = _normalize_gate_encoding_jax(
+        encode_gate_pos_jax(next_target_rel, next_gate_normal_target)
+    )
 
     out = jnp.concatenate(
         [body_vel, body_rates, rotation_matrix, target_encoding, next_target_encoding],

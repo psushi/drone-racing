@@ -66,6 +66,20 @@ The trainer reads `config/level1.toml` and writes checkpoints to:
 artifacts/policy_jax.msgpack
 ```
 
+There is also an easier curriculum config at `config/level1_flat.toml` with:
+
+- all gates at the same height
+- larger gate spacing
+- a gentler path for early PPO experiments
+
+Use it with:
+
+```bash
+pixi run train --config level1_flat.toml
+pixi run watch --config level1_flat.toml
+pixi run debug --config level1_flat.toml
+```
+
 Render the latest JAX checkpoint:
 
 ```bash

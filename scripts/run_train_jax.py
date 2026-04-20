@@ -31,7 +31,9 @@ class RolloutBatch(NamedTuple):
     action: jax.Array
     log_prob: jax.Array
     value: jax.Array
+    next_value: jax.Array
     reward: jax.Array
+    terminated: jax.Array
     done: jax.Array
     passed: jax.Array
 
@@ -57,6 +59,22 @@ def make_metrics_table(metrics: dict[str, float | int]) -> Table:
 
 def scale_actions_jax(actions: jax.Array, action_low: jax.Array, action_high: jax.Array) -> jax.Array:
     return jnp.clip(actions, action_low, action_high)
+
+
+def _select_obs_by_mask(
+    reset_obs: dict[str, jax.Array],
+    final_obs: dict[str, jax.Array],
+    mask: jax.Array,
+) -> dict[str, jax.Array]:
+    return jax.tree_util.tree_map(
+        lambda reset_x, final_x: jnp.where(
+            mask.reshape(mask.shape + (1,) * (reset_x.ndim - 1)),
+            final_x,
+            reset_x,
+        ),
+        reset_obs,
+        final_obs,
+    )
 
 
 def create_train_state(
@@ -150,13 +168,22 @@ def make_collect_rollout_fn(
             env_state, next_obs_dict, reward, terminated, truncated, info = env.step_fn(env_state, action)
             done = jnp.logical_or(terminated, truncated)
             next_obs = flatten_obs_jax(next_obs_dict, vectorized=True)
+            bootstrap_obs_dict = _select_obs_by_mask(
+                next_obs_dict,
+                info["final_observation"],
+                truncated,
+            )
+            bootstrap_obs = flatten_obs_jax(bootstrap_obs_dict, vectorized=True)
+            _, next_value = model.apply(train_state.params, bootstrap_obs)
 
             transition = RolloutBatch(
                 obs=last_obs,
                 action=raw_action,
                 log_prob=log_prob,
                 value=value,
+                next_value=next_value,
                 reward=reward,
+                terminated=terminated,
                 done=done,
                 passed=info["passed"],
             )
@@ -187,15 +214,14 @@ def make_train_iteration_fn(
     @jax.jit
     def train_iteration(runner_state: RunnerState, ent_coef: jax.Array):
         runner_state, rollout = collect_rollout(runner_state)
-        _, last_value = model.apply(runner_state.train_state.params, runner_state.last_obs)
-
         advantages, returns = compute_gae_jax(
             rollout.value,
             rollout.reward,
+            rollout.next_value,
             rollout.done,
+            rollout.terminated,
             gamma,
             gae_lambda,
-            last_value,
         )
         batch = flatten_batch(rollout, advantages, returns)
 

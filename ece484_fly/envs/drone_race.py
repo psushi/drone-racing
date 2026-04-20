@@ -33,6 +33,7 @@ class DroneRaceEnv(RaceCoreEnv, Env):
         control_mode: Literal["state", "attitude"] = "state",
         disturbances: ConfigDict | None = None,
         randomizations: ConfigDict | None = None,
+        reward_config: ConfigDict | None = None,
         seed: str | int = "random",
         max_episode_steps: int = 1500,
         device: Literal["cpu", "gpu"] = "cpu",
@@ -47,6 +48,7 @@ class DroneRaceEnv(RaceCoreEnv, Env):
             control_mode: Control mode for the drones. See `build_action_space` for details.
             disturbances: Disturbance configuration.
             randomizations: Randomization configuration.
+            reward_config: Reward shaping configuration.
             seed: "random" for a generated seed or the random seed directly.
             max_episode_steps: Maximum number of steps per episode.
             device: Device used for the environment and the simulation.
@@ -61,6 +63,7 @@ class DroneRaceEnv(RaceCoreEnv, Env):
             control_mode=control_mode,
             disturbances=disturbances,
             randomizations=randomizations,
+            reward_config=reward_config,
             seed=seed,
             max_episode_steps=max_episode_steps,
             device=device,
@@ -115,6 +118,7 @@ class VecDroneRaceEnv(RaceCoreEnv, VectorEnv):
         control_mode: Literal["state", "attitude"] = "state",
         disturbances: ConfigDict | None = None,
         randomizations: ConfigDict | None = None,
+        reward_config: ConfigDict | None = None,
         seed: int = 1337,
         max_episode_steps: int = 1500,
         device: Literal["cpu", "gpu"] = "cpu",
@@ -130,6 +134,7 @@ class VecDroneRaceEnv(RaceCoreEnv, VectorEnv):
             control_mode: Control mode for the drones. See `build_action_space` for details.
             disturbances: Disturbance configuration.
             randomizations: Randomization configuration.
+            reward_config: Reward shaping configuration.
             seed: Random seed.
             max_episode_steps: Maximum number of steps per episode.
             device: Device used for the environment and the simulation.
@@ -144,6 +149,7 @@ class VecDroneRaceEnv(RaceCoreEnv, VectorEnv):
             control_mode=control_mode,
             disturbances=disturbances,
             randomizations=randomizations,
+            reward_config=reward_config,
             seed=seed,
             max_episode_steps=max_episode_steps,
             device=device,

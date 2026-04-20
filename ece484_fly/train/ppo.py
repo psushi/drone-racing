@@ -38,26 +38,28 @@ def compute_gae(
 def compute_gae_jax(
     values: jax.Array,
     rewards: jax.Array,
+    next_values: jax.Array,
     dones: jax.Array,
+    terminateds: jax.Array,
     gamma: float,
     lambda_: float,
-    last_value: jax.Array,
 ) -> tuple[jax.Array, jax.Array]:
     """JAX-native GAE over a [T, N] rollout."""
 
     def scan_step(carry, inputs):
-        next_gae, next_value = carry
-        value_t, reward_t, done_t = inputs
+        next_gae = carry
+        value_t, reward_t, next_value_t, done_t, terminated_t = inputs
         not_done = 1.0 - done_t.astype(jnp.float32)
-        delta = reward_t + gamma * next_value * not_done - value_t
+        not_terminated = 1.0 - terminated_t.astype(jnp.float32)
+        delta = reward_t + gamma * next_value_t * not_terminated - value_t
         gae = delta + gamma * lambda_ * not_done * next_gae
-        return (gae, value_t), gae
+        return gae, gae
 
-    init_carry = (jnp.zeros_like(last_value), last_value)
-    (_, _), advantages_rev = jax.lax.scan(
+    init_carry = jnp.zeros_like(values[0])
+    _, advantages_rev = jax.lax.scan(
         scan_step,
         init_carry,
-        (values[::-1], rewards[::-1], dones[::-1]),
+        (values[::-1], rewards[::-1], next_values[::-1], dones[::-1], terminateds[::-1]),
     )
     advantages = advantages_rev[::-1]
     returns = advantages + values
