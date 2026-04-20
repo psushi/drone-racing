@@ -65,6 +65,7 @@ gate_width = 0.4
 safety_activation_distance = 2.5
 crash_penalty = 5.0
 gate_pass_bonus = 5.0
+vel_penalty_scale = 0.01
 
 [env.track]
 # Full track radomization. When activated, the position (x & y) and orientation (yaw)

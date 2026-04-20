@@ -25,6 +25,11 @@ from ece484_fly.utils import load_config
 
 logger = logging.getLogger(__name__)
 
+try:
+    import wandb
+except ImportError:  # pragma: no cover - optional dependency
+    wandb = None
+
 
 class RolloutBatch(NamedTuple):
     obs: jax.Array
@@ -255,6 +260,9 @@ def run_train(
     seed: int = 0,
     checkpoint_path: str = "artifacts/policy_jax.msgpack",
     device: str = "auto",
+    wandb_project: str = "",
+    wandb_run_name: str = "",
+    wandb_mode: str = "online",
 ) -> None:
     cfg = load_config(Path(__file__).parents[1] / "config" / config)
     device = select_device(device)
@@ -266,6 +274,13 @@ def run_train(
         num_envs=num_envs if cfg.train.num_envs is None else cfg.train.num_envs,
         seed=seed,
         device=device,
+    )
+    transitions_per_iter = env.num_envs * cfg.train.num_steps
+    print(
+        "Training setup:",
+        f"num_envs={env.num_envs}",
+        f"num_steps={cfg.train.num_steps}",
+        f"transitions_per_iter={transitions_per_iter}",
     )
     action_low = jnp.asarray(env.single_action_space.low, dtype=jnp.float32)
     action_high = jnp.asarray(env.single_action_space.high, dtype=jnp.float32)
@@ -283,6 +298,28 @@ def run_train(
     env_state, obs_dict = env.reset(seed=seed)
     last_obs = flatten_obs_jax(obs_dict, vectorized=True)
     runner_state = RunnerState(train_state, env_state, last_obs, rng)
+
+    wandb_run = None
+    if wandb_project:
+        if wandb is None:
+            print("wandb logging requested, but wandb is not installed in the current Pixi env.")
+        else:
+            wandb_run = wandb.init(
+                project=wandb_project,
+                name=wandb_run_name or None,
+                mode=wandb_mode,
+                config={
+                    "config_file": config,
+                    "seed": seed,
+                    "device": device,
+                    "checkpoint_path": checkpoint_path,
+                    "train": dict(cfg.train),
+                    "env_reward": dict(cfg.env.get("reward") or {}),
+                    "num_envs_effective": env.num_envs,
+                    "transitions_per_iter": transitions_per_iter,
+                    "policy_obs_dim": POLICY_OBS_DIM,
+                },
+            )
 
     train_iteration = make_train_iteration_fn(
         model=model,
@@ -336,6 +373,15 @@ def run_train(
                     "entropy": float(epoch_metrics["entropy"][-1]),
                     "ent_coef": float(current_ent_coef),
                 }
+                if wandb_run is not None:
+                    wandb_run.log(
+                        {
+                            **live_metrics,
+                            "transitions_per_iter": transitions_per_iter,
+                            "total_transitions": (iter_idx + 1) * transitions_per_iter,
+                        },
+                        step=iter_idx,
+                    )
                 live.update(make_metrics_table(live_metrics))
 
         print(f"Final running mean reward: {total_reward_sum / total_reward_count:.4f}")
@@ -344,6 +390,8 @@ def run_train(
         checkpoint_file.write_bytes(serialization.to_bytes(runner_state.train_state.params))
         print(f"Saved checkpoint to {checkpoint_file}")
     finally:
+        if wandb_run is not None:
+            wandb_run.finish()
         env.close()
 
 

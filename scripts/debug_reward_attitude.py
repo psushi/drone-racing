@@ -69,6 +69,7 @@ def _reward_terms(
     segment_start_pos: np.ndarray,
     last_pos: np.ndarray,
     pos: np.ndarray,
+    vel: np.ndarray,
     ang_vel: np.ndarray,
     gate_pos: np.ndarray,
     gate_quat: np.ndarray,
@@ -84,6 +85,7 @@ def _reward_terms(
     safety_activation_distance = reward_cfg["safety_activation_distance"]
     crash_penalty = reward_cfg["crash_penalty"]
     gate_pass_bonus = reward_cfg["gate_pass_bonus"]
+    vel_penalty_scale = reward_cfg["vel_penalty_scale"]
 
     segment_dir = gate_pos - segment_start_pos
     segment_dir_norm = float(np.linalg.norm(segment_dir))
@@ -100,6 +102,7 @@ def _reward_terms(
     v = max((1.0 - f) * (gate_width / 6.0), 0.05)
     safety_reward = -f * (1.0 - np.exp(-0.5 * (lateral_offset**2) / v))
     ang_vel_penalty = ang_vel_penalty_scale * float(np.linalg.norm(ang_vel))
+    vel_penalty = vel_penalty_scale * float(np.linalg.norm(vel))
 
     newly_disabled = float(bool(disabled and not prev_disabled))
 
@@ -112,6 +115,7 @@ def _reward_terms(
         + safety_weight * safety_reward
         + gate_pass_bonus * float(passed)
         - ang_vel_penalty
+        - vel_penalty
         - crash_penalty * newly_disabled
     )
     return {
@@ -119,6 +123,7 @@ def _reward_terms(
         "safety": safety_reward,
         "gate": gate_pass_bonus * float(passed),
         "ang_vel": -ang_vel_penalty,
+        "vel": -vel_penalty,
         "crash": -crash_penalty * newly_disabled,
         "total": total,
         "curr_target_dist": float(np.linalg.norm(pos - gate_pos)),
@@ -167,6 +172,7 @@ def debug_reward_attitude(
         "safety_activation_distance": float(reward_cfg.get("safety_activation_distance", 2.5)),
         "crash_penalty": float(reward_cfg.get("crash_penalty", 5.0)),
         "gate_pass_bonus": float(reward_cfg.get("gate_pass_bonus", 5.0)),
+        "vel_penalty_scale": float(reward_cfg.get("vel_penalty_scale", 0.01)),
     }
     print("JAX devices:", jax.devices())
     print("Using device:", device)
@@ -245,6 +251,7 @@ def debug_reward_attitude(
                 segment_start_pos,
                 last_pos,
                 pos,
+                vel,
                 ang_vel,
                 gate_pos,
                 gate_quat,
@@ -266,7 +273,8 @@ def debug_reward_attitude(
                 )
                 print(
                     "  "
-                    f"ang_vel={terms['ang_vel']:+.4f} crash={terms['crash']:+.1f} "
+                    f"ang_vel={terms['ang_vel']:+.4f} vel={terms['vel']:+.4f} "
+                    f"crash={terms['crash']:+.1f} "
                     f"total={terms['total']:+.4f}"
                 )
                 print(

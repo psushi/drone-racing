@@ -112,6 +112,7 @@ class EnvData:
     safety_activation_distance: Array
     crash_penalty: Array
     gate_pass_bonus: Array
+    vel_penalty_scale: Array
 
     @classmethod
     def create(
@@ -134,6 +135,7 @@ class EnvData:
         safety_activation_distance: float,
         crash_penalty: float,
         gate_pass_bonus: float,
+        vel_penalty_scale: float,
         device: Device,
     ) -> EnvData:
         """Create a new environment data struct with default values."""
@@ -166,6 +168,7 @@ class EnvData:
             ),
             crash_penalty=jnp.array([crash_penalty], dtype=jnp.float32, device=device),
             gate_pass_bonus=jnp.array([gate_pass_bonus], dtype=jnp.float32, device=device),
+            vel_penalty_scale=jnp.array([vel_penalty_scale], dtype=jnp.float32, device=device),
         )
 
 
@@ -349,6 +352,7 @@ class RaceCoreEnv:
             ),
             "crash_penalty": float(reward_cfg.get("crash_penalty", 5.0)),
             "gate_pass_bonus": float(reward_cfg.get("gate_pass_bonus", 5.0)),
+            "vel_penalty_scale": float(reward_cfg.get("vel_penalty_scale", 0.01)),
         }
 
         # Load the track into the simulation and compile the reset and step functions with hooks
@@ -379,6 +383,7 @@ class RaceCoreEnv:
             safety_activation_distance=self.reward_config["safety_activation_distance"],
             crash_penalty=self.reward_config["crash_penalty"],
             gate_pass_bonus=self.reward_config["gate_pass_bonus"],
+            vel_penalty_scale=self.reward_config["vel_penalty_scale"],
             device=self.device,
         )
         self.randomize_track = build_track_randomization_fn(randomizations, gate_ids, obstacle_ids)
@@ -698,6 +703,7 @@ class RaceCoreEnv:
         safety_activation_distance: Array,
         crash_penalty: Array,
         gate_pass_bonus: Array,
+        vel_penalty_scale: Array,
     ) -> Array:
         """Compute the transition reward for the current step."""
         segment_dir = gate_pos - segment_start_pos
@@ -721,6 +727,7 @@ class RaceCoreEnv:
         v = jnp.maximum((1.0 - f) * (gate_width / 6.0), 0.05)
         safety_reward = -f * (1.0 - jnp.exp(-0.5 * (lateral_offset**2) / v))
         ang_vel_penalty = ang_vel_penalty_scale * jnp.linalg.norm(drone_ang_vel, axis=-1)
+        vel_penalty = vel_penalty_scale * jnp.linalg.norm(drone_vel, axis=-1)
 
         segment_progress = jnp.where(disabled_drones, 0.0, segment_progress)
         safety_reward = jnp.where(disabled_drones, 0.0, safety_reward)
@@ -730,6 +737,7 @@ class RaceCoreEnv:
             + safety_weight * safety_reward
             + gate_pass_bonus * passed.astype(jnp.float32)
             - ang_vel_penalty
+            - vel_penalty
             - crash_penalty * newly_disabled.astype(jnp.float32)
         )
 
@@ -790,6 +798,7 @@ class RaceCoreEnv:
             data.safety_activation_distance,
             data.crash_penalty,
             data.gate_pass_bonus,
+            data.vel_penalty_scale,
         )
         # Update the target gate index. Increment by one if drones have passed a gate
         target_gate = data.target_gate + passed * ~disabled_drones

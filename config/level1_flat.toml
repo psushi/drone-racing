@@ -16,8 +16,8 @@ drone_model = "cf21B_500"
 [train]
 num_steps = 64
 num_minibatches = 8
-num_envs = 128
-num_iterations = 300
+num_envs = 64
+num_iterations = 500
 gamma = 0.99
 lambda_ = 0.95
 max_grad_norm = 0.5
@@ -44,13 +44,14 @@ sensor_range = 0.7
 control_mode = "attitude"
 
 [env.reward]
-progress_scale = 10.0
+progress_scale = 20.0
 safety_weight = 1.0
-ang_vel_penalty_scale = 0.01
+ang_vel_penalty_scale = 0.005
 gate_width = 0.4
 safety_activation_distance = 2.5
 crash_penalty = 5.0
 gate_pass_bonus = 5.0
+vel_penalty_scale = 0.01
 
 [env.track]
 randomize = false

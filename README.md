@@ -92,6 +92,14 @@ Inspect reward terms while stepping the learned policy:
 pixi run debug
 ```
 
+Optional W&B logging is supported from the same trainer. After `wandb login`, run:
+
+```bash
+pixi run train --config level1_flat.toml --wandb_project drone-track-jax --wandb_run_name flat-128env
+```
+
+The live terminal table still runs locally; W&B just mirrors the key metrics and transition counts.
+
 The default training config is a moderate baseline:
 
 - `num_envs = 32`
