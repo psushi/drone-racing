@@ -767,12 +767,24 @@ class RaceCoreEnv:
         vel_penalty_scale: Array,
     ) -> Array:
         """Compute the transition reward for the current step."""
+        def segment_progress_coordinate(pos_along_segment: Array, segment_length: Array) -> Array:
+            # Reward forward motion up to the gate, then flip the incentive if the drone
+            # continues past the gate without actually crossing it.
+            return jnp.where(
+                pos_along_segment <= segment_length,
+                pos_along_segment,
+                2.0 * segment_length - pos_along_segment,
+            )
+
         segment_dir = gate_pos - segment_start_pos
         segment_dir_norm = jnp.linalg.norm(segment_dir, axis=-1, keepdims=True)
         safe_segment_dir = segment_dir / jnp.maximum(segment_dir_norm, 1e-6)
+        segment_length = jnp.squeeze(segment_dir_norm, axis=-1)
         s_prev = jnp.sum((last_drone_pos - segment_start_pos) * safe_segment_dir, axis=-1)
         s_curr = jnp.sum((drone_pos - segment_start_pos) * safe_segment_dir, axis=-1)
-        segment_progress = progress_scale * (s_curr - s_prev)
+        shaped_s_prev = segment_progress_coordinate(s_prev, segment_length)
+        shaped_s_curr = segment_progress_coordinate(s_curr, segment_length)
+        segment_progress = progress_scale * (shaped_s_curr - shaped_s_prev)
 
         gate_normal = RaceCoreEnv._quat_apply(
             gate_quat,

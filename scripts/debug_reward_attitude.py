@@ -78,6 +78,11 @@ def _reward_terms(
     prev_disabled: bool,
     reward_cfg: dict[str, float],
 ) -> dict[str, float]:
+    def segment_progress_coordinate(pos_along_segment: float, segment_length: float) -> float:
+        if pos_along_segment <= segment_length:
+            return pos_along_segment
+        return 2.0 * segment_length - pos_along_segment
+
     progress_scale = reward_cfg["progress_scale"]
     safety_weight = reward_cfg["safety_weight"]
     ang_vel_penalty_scale = reward_cfg["ang_vel_penalty_scale"]
@@ -92,7 +97,9 @@ def _reward_terms(
     safe_segment_dir = segment_dir / max(segment_dir_norm, 1e-6)
     s_prev = float(np.dot(last_pos - segment_start_pos, safe_segment_dir))
     s_curr = float(np.dot(pos - segment_start_pos, safe_segment_dir))
-    progress_reward = progress_scale * (s_curr - s_prev)
+    shaped_s_prev = segment_progress_coordinate(s_prev, segment_dir_norm)
+    shaped_s_curr = segment_progress_coordinate(s_curr, segment_dir_norm)
+    progress_reward = progress_scale * (shaped_s_curr - shaped_s_prev)
 
     gate_normal = _quat_apply_np(gate_quat, np.array([1.0, 0.0, 0.0], dtype=np.float32))
     rel_gate = pos - gate_pos
