@@ -33,8 +33,8 @@ drone_model = "cf21B_500"
 camera_view = [5.0, 180.0, -25.0, 0.0, 0.0, 0.0]
 freq = 500
 attitude_freq = 500
-# render = true
-# pause = true
+render = false
+pause = false
 
 [env]
 id = "DroneRacing-v0"
@@ -45,7 +45,7 @@ control_mode = "attitude"
 
 [env.reward]
 progress_scale = 20.0
-ang_vel_penalty_scale = 0.004
+ang_vel_penalty_scale = 0.002
 safety_weight = 1.5
 gate_width = 0.4
 safety_activation_distance = 2.5
