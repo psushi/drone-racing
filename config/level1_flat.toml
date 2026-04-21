@@ -46,14 +46,14 @@ control_mode = "attitude"
 [env.reward]
 progress_scale = 20.0
 safety_weight = 1.0
-ang_vel_penalty_scale = 0.005
+ang_vel_penalty_scale = 0.01
 gate_width = 0.4
 safety_activation_distance = 2.5
 crash_penalty = 5.0
 gate_pass_bonus = 5.0
 vel_penalty_scale = 0.02
 max_linear_speed = 8.0
-max_angular_speed = 1000000.0
+max_angular_speed = 25.0
 
 [env.reset]
 gate_indices = [0, 1, 2, 3]
