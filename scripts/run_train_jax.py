@@ -352,7 +352,11 @@ def run_train(
         with Live(make_metrics_table(live_metrics), refresh_per_second=4) as live:
             for iter_idx in range(cfg.train.num_iterations):
                 progress = iter_idx / max(cfg.train.num_iterations - 1, 1)
-                current_ent_coef = cfg.train.ent_coef * (1.0 - 0.9 * progress)
+                # Front-load exploration, then decay aggressively so the policy can
+                # consolidate once it starts reliably passing gates.
+                min_ent_coef = 5e-4
+                ent_decay = (1.0 - progress) ** 2
+                current_ent_coef = min_ent_coef + (cfg.train.ent_coef - min_ent_coef) * ent_decay
                 runner_state, rollout, metrics = train_iteration(
                     runner_state, jnp.asarray(current_ent_coef, dtype=jnp.float32)
                 )
