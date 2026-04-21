@@ -21,6 +21,7 @@ from ece484_fly.train.actor_critic_models import ActorCritic
 from ece484_fly.train.experiment_io import (
     choose_runtime_config_path,
     default_metadata,
+    normalize_checkpoint_path,
     write_experiment_sidecar,
 )
 from ece484_fly.train.obs import POLICY_OBS_DIM, flatten_obs_jax
@@ -284,12 +285,13 @@ def run_train(
     config: str = "level1.toml",
     num_envs: int = 100,
     seed: int = 0,
-    checkpoint_path: str = "artifacts/policy_jax.msgpack",
+    checkpoint_path: str = "artifacts/policy_jax/model.msgpack",
     device: str = "auto",
     wandb_project: str = "",
     wandb_run_name: str = "",
     wandb_mode: str = "online",
 ) -> None:
+    checkpoint_path = str(normalize_checkpoint_path(checkpoint_path))
     repo_root = Path(__file__).parents[1]
     resolved_config_path = choose_runtime_config_path(
         repo_root,
@@ -385,6 +387,13 @@ def run_train(
 
     total_reward_sum = 0.0
     total_reward_count = 0
+    final_metrics: dict[str, float | int] = {}
+    best_metrics = {
+        "best_avg_gates_passed": float("-inf"),
+        "best_episode_gates_mean": float("-inf"),
+        "best_episode_pass_rate": float("-inf"),
+        "best_running_mean_reward": float("-inf"),
+    }
     try:
         live_metrics = {
             "iteration": 0,
@@ -436,6 +445,23 @@ def run_train(
                     "entropy": float(epoch_metrics["entropy"][-1]),
                     "ent_coef": float(current_ent_coef),
                 }
+                final_metrics = dict(live_metrics)
+                best_metrics["best_avg_gates_passed"] = max(
+                    best_metrics["best_avg_gates_passed"],
+                    live_metrics["avg_gates_passed"],
+                )
+                best_metrics["best_episode_gates_mean"] = max(
+                    best_metrics["best_episode_gates_mean"],
+                    live_metrics["episode_gates_mean"],
+                )
+                best_metrics["best_episode_pass_rate"] = max(
+                    best_metrics["best_episode_pass_rate"],
+                    live_metrics["episode_pass_rate"],
+                )
+                best_metrics["best_running_mean_reward"] = max(
+                    best_metrics["best_running_mean_reward"],
+                    live_metrics["running_mean_reward"],
+                )
                 if wandb_run is not None:
                     wandb_run.log(
                         {
@@ -465,6 +491,8 @@ def run_train(
                 ),
                 "completed_iterations": int(cfg.train.num_iterations),
                 "final_running_mean_reward": total_reward_sum / total_reward_count,
+                "final_metrics": final_metrics,
+                "best_metrics": best_metrics,
             },
         )
         print(f"Saved checkpoint to {checkpoint_file}")

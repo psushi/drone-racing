@@ -14,7 +14,7 @@ from flax import serialization
 
 from ece484_fly.envs.jax_env import FunctionalJaxVecDroneRaceEnv
 from ece484_fly.train.actor_critic_models import ActorCritic
-from ece484_fly.train.experiment_io import choose_runtime_config_path
+from ece484_fly.train.experiment_io import choose_runtime_config_path, normalize_checkpoint_path
 from ece484_fly.train.obs import POLICY_OBS_DIM, flatten_obs_jax
 from ece484_fly.train.utils import normalize_actions, select_device
 from ece484_fly.utils import load_config
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def watch_policy(
-    checkpoint_path: str = "artifacts/policy_jax.msgpack",
+    checkpoint_path: str = "artifacts/policy_jax/model.msgpack",
     config: str = "level1.toml",
     seed: int = 0,
     pause: bool = False,
@@ -39,6 +39,7 @@ def watch_policy(
     reset_shift_vertical: float = 0.0,
 ) -> None:
     """Load a saved policy and render rollouts using the training env path."""
+    checkpoint_path = str(normalize_checkpoint_path(checkpoint_path))
     repo_root = Path(__file__).parents[1]
     resolved_config_path = choose_runtime_config_path(repo_root, checkpoint_path, config)
     cfg = load_config(resolved_config_path)

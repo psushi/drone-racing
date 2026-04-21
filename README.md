@@ -63,14 +63,14 @@ pixi run train
 The trainer reads a TOML config and writes checkpoints to:
 
 ```text
-artifacts/policy_jax.msgpack
+artifacts/policy_jax/model.msgpack
 ```
 
-It also snapshots the fully resolved run config and metadata next to the checkpoint:
+It also snapshots the fully resolved run config and metadata into the same directory:
 
 ```text
-artifacts/policy_jax.toml
-artifacts/policy_jax.json
+artifacts/policy_jax/config.toml
+artifacts/policy_jax/metadata.json
 ```
 
 This is the recommended experiment loop. Train, watch, and debug should all point at the same
@@ -118,12 +118,32 @@ The live terminal table still runs locally; W&B just mirrors the key metrics and
 Recommended workflow for reproducible experiments:
 
 ```bash
-pixi run train --config level1_flat.toml --checkpoint_path artifacts/flat_baseline.msgpack
-pixi run watch --checkpoint_path artifacts/flat_baseline.msgpack
-pixi run debug --checkpoint_path artifacts/flat_baseline.msgpack
+pixi run train --config level1_flat.toml --checkpoint_path flat_baseline
+pixi run watch --checkpoint_path flat_baseline
+pixi run debug --checkpoint_path flat_baseline
 ```
 
-All three commands will now agree on the same saved config unless you explicitly override it.
+The shorthand `flat_baseline` resolves to:
+
+```text
+artifacts/flat_baseline/model.msgpack
+artifacts/flat_baseline/config.toml
+artifacts/flat_baseline/metadata.json
+```
+
+All three commands will agree on the same saved config unless you explicitly override it.
+The metadata file also stores final and best training metrics for quick experiment comparison,
+including:
+
+- `avg_gates_passed`
+- `episode_gates_mean`
+- `episode_pass_rate`
+- `running_mean_reward`
+- `done_rate`
+- `actor_loss`
+- `value_loss`
+- `entropy`
+- `ent_coef`
 
 The default training config is a moderate baseline:
 

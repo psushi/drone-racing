@@ -12,14 +12,51 @@ import toml
 from ml_collections import ConfigDict
 
 
+def normalize_checkpoint_path(checkpoint_path: str | Path, *, artifacts_dir: str | Path = "artifacts") -> Path:
+    """Resolve shorthand checkpoint names into the standard artifacts layout.
+
+    Examples:
+    - ``flat_baseline`` -> ``artifacts/flat_baseline/model.msgpack``
+    - ``artifacts/flat_baseline`` -> ``artifacts/flat_baseline/model.msgpack``
+    - ``artifacts/flat_baseline/model.msgpack`` -> unchanged
+    - ``/tmp/run42.msgpack`` -> unchanged
+    """
+
+    checkpoint = Path(checkpoint_path)
+    if checkpoint.suffix == ".msgpack":
+        return checkpoint
+    if checkpoint.suffix:
+        return checkpoint
+
+    parts = checkpoint.parts
+    if checkpoint.is_absolute() or (parts and parts[0] == str(artifacts_dir)):
+        return checkpoint / "model.msgpack"
+    return Path(artifacts_dir) / checkpoint / "model.msgpack"
+
+
+def checkpoint_directory(checkpoint_path: str | Path) -> Path:
+    checkpoint = Path(checkpoint_path)
+    if checkpoint.suffix == ".msgpack":
+        return checkpoint.parent
+    return checkpoint
+
+
 def checkpoint_config_path(checkpoint_path: str | Path) -> Path:
     checkpoint = Path(checkpoint_path)
-    return checkpoint.with_suffix(".toml")
+    if checkpoint.suffix == ".msgpack":
+        legacy_path = checkpoint.with_suffix(".toml")
+        if legacy_path.exists():
+            return legacy_path
+    return checkpoint_directory(checkpoint_path) / "config.toml"
 
 
 def checkpoint_metadata_path(checkpoint_path: str | Path) -> Path:
     checkpoint = Path(checkpoint_path)
-    return checkpoint.with_suffix(".json")
+    if checkpoint.suffix == ".msgpack":
+        legacy_path = checkpoint.with_suffix(".json")
+        if legacy_path.exists():
+            return legacy_path
+    return checkpoint_directory(checkpoint_path) / "metadata.json"
 
 
 def resolve_config_path(repo_root: Path, config: str) -> Path:
@@ -73,7 +110,8 @@ def write_experiment_sidecar(
     """Write config and metadata next to a checkpoint path."""
 
     checkpoint = Path(checkpoint_path)
-    checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint_dir = checkpoint_directory(checkpoint)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     config_path = checkpoint_config_path(checkpoint)
     metadata_path = checkpoint_metadata_path(checkpoint)
