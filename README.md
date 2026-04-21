@@ -60,11 +60,21 @@ Run JAX training:
 pixi run train
 ```
 
-The trainer reads `config/level1.toml` and writes checkpoints to:
+The trainer reads a TOML config and writes checkpoints to:
 
 ```text
 artifacts/policy_jax.msgpack
 ```
+
+It also snapshots the fully resolved run config and metadata next to the checkpoint:
+
+```text
+artifacts/policy_jax.toml
+artifacts/policy_jax.json
+```
+
+This is the recommended experiment loop. Train, watch, and debug should all point at the same
+checkpoint so they use the same sidecar config automatically.
 
 There is also an easier curriculum config at `config/level1_flat.toml` with:
 
@@ -86,11 +96,16 @@ Render the latest JAX checkpoint:
 pixi run watch
 ```
 
+If `artifacts/policy_jax.toml` exists, the watcher will use that run-local config by default.
+You can still override it explicitly with `--config`.
+
 Inspect reward terms while stepping the learned policy:
 
 ```bash
 pixi run debug
 ```
+
+The debug script follows the same rule and prefers the checkpoint sidecar config when present.
 
 Optional W&B logging is supported from the same trainer. After `wandb login`, run:
 
@@ -99,6 +114,16 @@ pixi run train --config level1_flat.toml --wandb_project drone-track-jax --wandb
 ```
 
 The live terminal table still runs locally; W&B just mirrors the key metrics and transition counts.
+
+Recommended workflow for reproducible experiments:
+
+```bash
+pixi run train --config level1_flat.toml --checkpoint_path artifacts/flat_baseline.msgpack
+pixi run watch --checkpoint_path artifacts/flat_baseline.msgpack
+pixi run debug --checkpoint_path artifacts/flat_baseline.msgpack
+```
+
+All three commands will now agree on the same saved config unless you explicitly override it.
 
 The default training config is a moderate baseline:
 

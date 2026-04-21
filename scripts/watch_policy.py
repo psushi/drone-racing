@@ -14,6 +14,7 @@ from flax import serialization
 
 from ece484_fly.envs.jax_env import FunctionalJaxVecDroneRaceEnv
 from ece484_fly.train.actor_critic_models import ActorCritic
+from ece484_fly.train.experiment_io import choose_runtime_config_path
 from ece484_fly.train.obs import POLICY_OBS_DIM, flatten_obs_jax
 from ece484_fly.train.utils import normalize_actions, select_device
 from ece484_fly.utils import load_config
@@ -38,7 +39,9 @@ def watch_policy(
     reset_shift_vertical: float = 0.0,
 ) -> None:
     """Load a saved policy and render rollouts using the training env path."""
-    cfg = load_config(Path(__file__).parents[1] / "config" / config)
+    repo_root = Path(__file__).parents[1]
+    resolved_config_path = choose_runtime_config_path(repo_root, checkpoint_path, config)
+    cfg = load_config(resolved_config_path)
     if disable_ang_speed_limit:
         reward_cfg = cfg.env.get("reward")
         if reward_cfg is None:
@@ -48,13 +51,14 @@ def watch_policy(
     device = select_device(device)
     print("JAX devices:", jax.devices())
     print("Using device:", device)
+    print(f"Using config: {resolved_config_path}")
     if gate_shift_x or gate_shift_y or gate_shift_z or reset_shift_forward or reset_shift_lateral or reset_shift_vertical:
         print("watch_policy now uses the functional training env path; gate/reset shift overrides are ignored.")
     if disable_ang_speed_limit:
         print("watch_policy override: angular-speed limit disabled")
 
     env = FunctionalJaxVecDroneRaceEnv(
-        config=config,
+        config=str(resolved_config_path),
         num_envs=1,
         seed=seed,
         device=device,

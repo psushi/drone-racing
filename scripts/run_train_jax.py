@@ -18,6 +18,11 @@ from rich.table import Table
 
 from ece484_fly.envs.jax_env import FunctionalJaxVecDroneRaceEnv
 from ece484_fly.train.actor_critic_models import ActorCritic
+from ece484_fly.train.experiment_io import (
+    choose_runtime_config_path,
+    default_metadata,
+    write_experiment_sidecar,
+)
 from ece484_fly.train.obs import POLICY_OBS_DIM, flatten_obs_jax
 from ece484_fly.train.ppo import compute_gae_jax, ppo_loss
 from ece484_fly.train.utils import select_device
@@ -285,13 +290,21 @@ def run_train(
     wandb_run_name: str = "",
     wandb_mode: str = "online",
 ) -> None:
-    cfg = load_config(Path(__file__).parents[1] / "config" / config)
+    repo_root = Path(__file__).parents[1]
+    resolved_config_path = choose_runtime_config_path(
+        repo_root,
+        checkpoint_path,
+        config,
+        prefer_checkpoint_sidecar=False,
+    )
+    cfg = load_config(resolved_config_path)
     device = select_device(device)
     print("JAX devices:", jax.devices())
     print("Using device:", device)
+    print(f"Using config: {resolved_config_path}")
 
     env = FunctionalJaxVecDroneRaceEnv(
-        config=config,
+        config=str(resolved_config_path),
         num_envs=num_envs if cfg.train.num_envs is None else cfg.train.num_envs,
         seed=seed,
         device=device,
@@ -303,6 +316,20 @@ def run_train(
         f"num_steps={cfg.train.num_steps}",
         f"transitions_per_iter={transitions_per_iter}",
     )
+    sidecar_config_path, sidecar_metadata_path = write_experiment_sidecar(
+        checkpoint_path=checkpoint_path,
+        resolved_config_path=resolved_config_path,
+        cfg=cfg,
+        metadata=default_metadata(
+            repo_root=repo_root,
+            seed=seed,
+            device=device,
+            num_envs_effective=env.num_envs,
+            transitions_per_iter=transitions_per_iter,
+        ),
+    )
+    print(f"Saved run config to {sidecar_config_path}")
+    print(f"Saved run metadata to {sidecar_metadata_path}")
     action_low = jnp.asarray(env.single_action_space.low, dtype=jnp.float32)
     action_high = jnp.asarray(env.single_action_space.high, dtype=jnp.float32)
 
@@ -330,7 +357,7 @@ def run_train(
                 name=wandb_run_name or None,
                 mode=wandb_mode,
                 config={
-                    "config_file": config,
+                    "config_file": str(resolved_config_path),
                     "seed": seed,
                     "device": device,
                     "checkpoint_path": checkpoint_path,
@@ -424,6 +451,22 @@ def run_train(
         checkpoint_file = Path(checkpoint_path)
         checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
         checkpoint_file.write_bytes(serialization.to_bytes(runner_state.train_state.params))
+        write_experiment_sidecar(
+            checkpoint_path=checkpoint_path,
+            resolved_config_path=resolved_config_path,
+            cfg=cfg,
+            metadata={
+                **default_metadata(
+                    repo_root=repo_root,
+                    seed=seed,
+                    device=device,
+                    num_envs_effective=env.num_envs,
+                    transitions_per_iter=transitions_per_iter,
+                ),
+                "completed_iterations": int(cfg.train.num_iterations),
+                "final_running_mean_reward": total_reward_sum / total_reward_count,
+            },
+        )
         print(f"Saved checkpoint to {checkpoint_file}")
     finally:
         if wandb_run is not None:
