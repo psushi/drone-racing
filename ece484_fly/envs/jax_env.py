@@ -133,8 +133,12 @@ class FunctionalJaxVecDroneRaceEnv:
         self._reset_gate_indices = jnp.asarray(self.env.reset_gate_indices, dtype=jnp.int32)
         self._reset_gate_probs = jnp.asarray(self.env.reset_gate_probs, dtype=jnp.float32)
         self._reset_post_prev_prob = float(self.env.reset_post_prev_prob)
-        self._reset_post_prev_speed = float(self.env.reset_post_prev_speed)
+        self._reset_post_prev_speed_min = float(self.env.reset_post_prev_speed_min)
+        self._reset_post_prev_speed_max = float(self.env.reset_post_prev_speed_max)
         self._reset_pre_gate_speed = float(self.env.reset_pre_gate_speed)
+        self._reset_post_prev_distance_min = float(self.env.reset_post_prev_distance_min)
+        self._reset_post_prev_distance_max = float(self.env.reset_post_prev_distance_max)
+        self._reset_yaw_jitter = float(self.env.reset_yaw_jitter)
 
         # Precompute a near-gate hover reset frame for every gate.
         gate_pos = np.asarray(self.env.gates["pos"], dtype=np.float32)
@@ -159,7 +163,7 @@ class FunctionalJaxVecDroneRaceEnv:
         )
 
     def _sample_reset_state(self, key: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-        keys = jax.random.split(key, 5)
+        keys = jax.random.split(key, 8)
         logits = jnp.log(self._reset_gate_probs)
         gate_choice = jax.random.categorical(keys[3], logits, shape=(self.num_envs,))
         reset_target_gate = self._reset_gate_indices[gate_choice]
@@ -175,7 +179,13 @@ class FunctionalJaxVecDroneRaceEnv:
         pre_lateral = self._reset_lateral[reset_target_gate]
         pre_quat = self._reset_gate_quat[reset_target_gate]
 
-        post_center = self._reset_center[prev_gate] + 1.25 * self._reset_forward[prev_gate] + 0.65 * self._reset_forward[prev_gate]
+        post_distance = jax.random.uniform(
+            keys[5],
+            (self.num_envs, 1),
+            minval=self._reset_post_prev_distance_min,
+            maxval=self._reset_post_prev_distance_max,
+        )
+        post_center = self._reset_center[prev_gate] + 1.25 * self._reset_forward[prev_gate] + post_distance * self._reset_forward[prev_gate]
         post_forward = self._reset_forward[prev_gate]
         post_lateral = self._reset_lateral[prev_gate]
         post_quat = self._reset_gate_quat[prev_gate]
@@ -193,10 +203,36 @@ class FunctionalJaxVecDroneRaceEnv:
             + lateral * reset_lateral
             + vertical * self._world_up
         )
-        post_speed = jnp.asarray(self._reset_post_prev_speed, dtype=jnp.float32)
+        post_speed = jax.random.uniform(
+            keys[6],
+            (self.num_envs,),
+            minval=self._reset_post_prev_speed_min,
+            maxval=self._reset_post_prev_speed_max,
+        )
         pre_speed = jnp.asarray(self._reset_pre_gate_speed, dtype=jnp.float32)
         reset_speed = jnp.where(use_post_prev, post_speed, pre_speed)
         reset_vel = reset_speed[:, None, None] * reset_forward
+        yaw_jitter = jax.random.uniform(
+            keys[7],
+            (self.num_envs, 1, 1),
+            minval=-self._reset_yaw_jitter,
+            maxval=self._reset_yaw_jitter,
+        )
+        half_yaw = 0.5 * yaw_jitter
+        yaw_quat = jnp.concatenate(
+            [
+                jnp.zeros_like(half_yaw),
+                jnp.zeros_like(half_yaw),
+                jnp.sin(half_yaw),
+                jnp.cos(half_yaw),
+            ],
+            axis=-1,
+        )
+        reset_quat = jnp.where(
+            use_post_prev[:, None, None],
+            RaceCoreEnv._quat_multiply(yaw_quat, reset_quat),
+            reset_quat,
+        )
         return reset_pos, reset_quat, reset_target_gate, reset_vel
 
     def _observe(self, state: FunctionalJaxVecEnvState) -> dict[str, jax.Array]:

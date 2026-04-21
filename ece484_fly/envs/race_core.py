@@ -402,8 +402,16 @@ class RaceCoreEnv:
         if not 0.0 <= post_prev_prob <= 1.0:
             raise ValueError("reset_config.post_prev_prob must be in [0, 1]")
         self.reset_post_prev_prob = post_prev_prob
-        self.reset_post_prev_speed = float(reset_cfg.get("post_prev_speed", 0.0))
+        self.reset_post_prev_speed_min = float(
+            reset_cfg.get("post_prev_speed_min", reset_cfg.get("post_prev_speed", 0.0))
+        )
+        self.reset_post_prev_speed_max = float(
+            reset_cfg.get("post_prev_speed_max", reset_cfg.get("post_prev_speed", 0.0))
+        )
         self.reset_pre_gate_speed = float(reset_cfg.get("pre_gate_speed", 0.0))
+        self.reset_post_prev_distance_min = float(reset_cfg.get("post_prev_distance_min", 0.35))
+        self.reset_post_prev_distance_max = float(reset_cfg.get("post_prev_distance_max", 0.95))
+        self.reset_yaw_jitter = float(reset_cfg.get("yaw_jitter", 0.15))
 
         # Load the track into the simulation and compile the reset and step functions with hooks
         self._setup_sim(randomizations)
@@ -514,7 +522,7 @@ class RaceCoreEnv:
         )
         hover_center = gate_pos - 1.25 * gate_forward
 
-        keys = jax.random.split(key, 5)
+        keys = jax.random.split(key, 8)
         reset_gate_indices = jnp.asarray(self.reset_gate_indices, dtype=jnp.int32)
         reset_gate_probs = jnp.asarray(self.reset_gate_probs, dtype=jnp.float32)
         gate_choice = jax.random.categorical(
@@ -535,7 +543,13 @@ class RaceCoreEnv:
         pre_lateral = gate_lateral[reset_target_gate]
         pre_quat = gate_quat[reset_target_gate]
 
-        post_center = gate_pos[prev_gate] + 0.65 * gate_forward[prev_gate]
+        post_distance = jax.random.uniform(
+            keys[5],
+            (self.sim.n_worlds, 1),
+            minval=self.reset_post_prev_distance_min,
+            maxval=self.reset_post_prev_distance_max,
+        )
+        post_center = gate_pos[prev_gate] + post_distance * gate_forward[prev_gate]
         post_forward = gate_forward[prev_gate]
         post_lateral = gate_lateral[prev_gate]
         post_quat = gate_quat[prev_gate]
@@ -554,11 +568,38 @@ class RaceCoreEnv:
             + lateral * gate_lateral
             + vertical * np.array([0.0, 0.0, 1.0], dtype=np.float32).reshape((1, 1, 3))
         )
-        post_speed = jnp.asarray(self.reset_post_prev_speed, dtype=jnp.float32)
+        post_speed = jax.random.uniform(
+            keys[6],
+            (self.sim.n_worlds,),
+            minval=self.reset_post_prev_speed_min,
+            maxval=self.reset_post_prev_speed_max,
+        )
         pre_speed = jnp.asarray(self.reset_pre_gate_speed, dtype=jnp.float32)
         reset_speed = jnp.where(use_post_prev, post_speed, pre_speed)
         reset_vel = reset_speed[:, None, None] * gate_forward
-        return hover_pos, gate_quat, reset_target_gate, reset_vel
+
+        yaw_jitter = jax.random.uniform(
+            keys[7],
+            (self.sim.n_worlds, 1, 1),
+            minval=-self.reset_yaw_jitter,
+            maxval=self.reset_yaw_jitter,
+        )
+        half_yaw = 0.5 * yaw_jitter
+        yaw_quat = jnp.concatenate(
+            [
+                jnp.zeros_like(half_yaw),
+                jnp.zeros_like(half_yaw),
+                jnp.sin(half_yaw),
+                jnp.cos(half_yaw),
+            ],
+            axis=-1,
+        )
+        reset_quat = jnp.where(
+            use_post_prev[:, None, None],
+            self._quat_multiply(yaw_quat, gate_quat),
+            gate_quat,
+        )
+        return hover_pos, reset_quat, reset_target_gate, reset_vel
 
     def _step(self, action: Array) -> tuple[dict[str, Array], float, bool, bool, dict]:
         """Step the firmware_wrapper class and its environment.
@@ -796,6 +837,22 @@ class RaceCoreEnv:
         uv = jnp.cross(q_xyz, vec)
         uuv = jnp.cross(q_xyz, uv)
         return vec + 2.0 * (q_w * uv + uuv)
+
+    @staticmethod
+    def _quat_multiply(lhs: Array, rhs: Array) -> Array:
+        """Quaternion product for [x, y, z, w] quaternions."""
+        lx, ly, lz, lw = lhs[..., 0:1], lhs[..., 1:2], lhs[..., 2:3], lhs[..., 3:4]
+        rx, ry, rz, rw = rhs[..., 0:1], rhs[..., 1:2], rhs[..., 2:3], rhs[..., 3:4]
+        xyz = jnp.concatenate(
+            [
+                lw * rx + lx * rw + ly * rz - lz * ry,
+                lw * ry - lx * rz + ly * rw + lz * rx,
+                lw * rz + lx * ry - ly * rx + lz * rw,
+            ],
+            axis=-1,
+        )
+        w = lw * rw - lx * rx - ly * ry - lz * rz
+        return jnp.concatenate([xyz, w], axis=-1)
 
     @staticmethod
     @jax.jit
