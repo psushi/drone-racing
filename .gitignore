@@ -9,6 +9,4 @@ __pycache__/
 .pixi/
 
 # Training artifacts and local notes
-artifacts/
-!artifacts/policy_jax.msgpack
 ideas.txt
