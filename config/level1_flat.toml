@@ -14,9 +14,9 @@ channel = 100
 drone_model = "cf21B_500"
 
 [train]
-num_steps = 64
+num_steps = 192
 num_minibatches = 8
-num_envs = 128
+num_envs = 64
 num_iterations = 1500
 gamma = 0.99
 lambda_ = 0.95
@@ -51,7 +51,7 @@ gate_width = 0.4
 safety_activation_distance = 2.5
 crash_penalty = 5.0
 gate_pass_bonus = 5.0
-vel_penalty_scale = 0.01
+vel_penalty_scale = 0.02
 
 [env.reset]
 gate_indices = [0, 1, 2, 3]
