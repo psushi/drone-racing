@@ -317,7 +317,7 @@ class FunctionalJaxVecDroneRaceEnv:
                 (0.45, 0.45),
             )
 
-            env_data = RaceCoreEnv._step_env(
+            env_data, disable_flags = RaceCoreEnv._step_env(
                 state.env_data,
                 sim_data.states.pos,
                 sim_data.states.quat,
@@ -349,7 +349,21 @@ class FunctionalJaxVecDroneRaceEnv:
                     next_state.env_data.marked_for_reset,
                 )
             obs = self._observe(next_state)
-            info = {"passed": passed[:, 0], "final_observation": final_obs}
+            info = {
+                "passed": passed[:, 0],
+                "final_observation": final_obs,
+                "raw_final_pos": sim_data.states.pos[:, 0],
+                "raw_final_vel": sim_data.states.vel[:, 0],
+                "raw_final_ang_vel": sim_data.states.ang_vel[:, 0],
+                "already_disabled": disable_flags.already_disabled[:, 0],
+                "no_target_left": disable_flags.no_target_left[:, 0],
+                "speed_limit": disable_flags.speed_limit[:, 0],
+                "angular_speed_limit": disable_flags.angular_speed_limit[:, 0],
+                "ground_crash": disable_flags.ground_crash[:, 0],
+                "out_of_bounds": disable_flags.out_of_bounds[:, 0],
+                "contact": disable_flags.contact[:, 0],
+                "invalid_state": disable_flags.invalid_state[:, 0],
+            }
             return next_state, obs, reward, terminated, truncated, info
 
         return step_fn

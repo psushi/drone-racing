@@ -178,6 +178,19 @@ class EnvData:
         )
 
 
+@dataclass
+class DisableReasonFlags:
+    disabled: Array
+    already_disabled: Array
+    no_target_left: Array
+    speed_limit: Array
+    angular_speed_limit: Array
+    ground_crash: Array
+    out_of_bounds: Array
+    contact: Array
+    invalid_state: Array
+
+
 def build_action_space(control_mode: Literal["state", "attitude"], drone_model: str) -> spaces.Box:
     """Create the action space for the environment.
 
@@ -565,8 +578,21 @@ class RaceCoreEnv:
         drone_ang_vel = self.sim.data.states.ang_vel
         mocap_pos, mocap_quat = self.sim.mjx_data.mocap_pos, self.sim.mjx_data.mocap_quat
         contacts = self.sim.contacts()
+        n_gates = len(self.data.gate_mj_ids)
+        gates_pos = mocap_pos[:, self.data.gate_mj_ids]
+        gates_quat = mocap_quat[:, self.data.gate_mj_ids][..., [1, 2, 3, 0]]
+        gate_ids = self.data.gate_mj_ids[self.data.target_gate % n_gates]
+        gate_pos = gates_pos[jnp.arange(gates_pos.shape[0])[:, None], gate_ids]
+        gate_quat = gates_quat[jnp.arange(gates_quat.shape[0])[:, None], gate_ids]
+        passed = gate_passed(
+            drone_pos,
+            self.data.last_drone_pos,
+            gate_pos,
+            gate_quat,
+            (0.45, 0.45),
+        )
         # Apply the environment logic with updated simulation data.
-        self.data = self._step_env(
+        self.data, disable_flags = self._step_env(
             self.data,
             drone_pos,
             drone_quat,
@@ -581,7 +607,22 @@ class RaceCoreEnv:
         reward = self.reward()
         terminated = self.terminated()
         truncated = self.truncated()
-        info = self.info()
+        final_obs = self.obs()
+        info = {
+            "passed": passed,
+            "final_observation": final_obs,
+            "raw_final_pos": drone_pos,
+            "raw_final_vel": drone_vel,
+            "raw_final_ang_vel": drone_ang_vel,
+            "already_disabled": disable_flags.already_disabled,
+            "no_target_left": disable_flags.no_target_left,
+            "speed_limit": disable_flags.speed_limit,
+            "angular_speed_limit": disable_flags.angular_speed_limit,
+            "ground_crash": disable_flags.ground_crash,
+            "out_of_bounds": disable_flags.out_of_bounds,
+            "contact": disable_flags.contact,
+            "invalid_state": disable_flags.invalid_state,
+        }
         marked_for_reset = self.data.marked_for_reset
         # Reset finished worlds immediately so the next policy call sees a fresh observation while
         # reward/done still describe the transition that just ended.
@@ -837,10 +878,10 @@ class RaceCoreEnv:
         mocap_quat: Array,
         contacts: Array,
         freq: int,
-    ) -> EnvData:
+    ) -> tuple[EnvData, DisableReasonFlags]:
         """Step the environment data."""
         n_gates = len(data.gate_mj_ids)
-        disabled_drones = RaceCoreEnv._disabled_drones(
+        disable_flags = RaceCoreEnv._disable_reason_flags(
             drone_pos,
             drone_quat,
             drone_vel,
@@ -848,6 +889,7 @@ class RaceCoreEnv:
             contacts,
             data,
         )
+        disabled_drones = disable_flags.disabled
         gates_pos = mocap_pos[:, data.gate_mj_ids]
         obstacles_pos = mocap_pos[:, data.obstacle_mj_ids]
         # We need to convert the mocap quat from MuJoCo order to scipy order
@@ -908,7 +950,7 @@ class RaceCoreEnv:
             steps=steps,
             last_action=normalized_action,
         )
-        return data
+        return data, disable_flags
 
     @staticmethod
     @jax.jit
@@ -964,6 +1006,49 @@ class RaceCoreEnv:
         return ~(pos_finite & quat_finite & vel_finite & ang_vel_finite & quat_valid)
 
     @staticmethod
+    def _disable_reason_flags(
+        pos: Array,
+        quat: Array,
+        vel: Array,
+        ang_vel: Array,
+        contacts: Array,
+        data: EnvData,
+    ) -> DisableReasonFlags:
+        already_disabled = data.disabled_drones
+        below_bounds = jnp.any(pos < data.pos_limit_low, axis=-1)
+        above_bounds = jnp.any(pos > data.pos_limit_high, axis=-1)
+        out_of_bounds = below_bounds | above_bounds
+        ground_crash = pos[..., 2] <= 0.02
+        linear_speed = jnp.linalg.norm(vel, axis=-1)
+        angular_speed = jnp.linalg.norm(ang_vel, axis=-1)
+        speed_limit = linear_speed > data.max_linear_speed
+        angular_speed_limit = angular_speed > data.max_angular_speed
+        no_target_left = data.target_gate == -1
+        invalid_state = RaceCoreEnv._invalid_drone_state(pos, quat, vel, ang_vel)
+        contact = jnp.any(contacts[:, None, :] & data.contact_masks, axis=-1)
+        disabled = (
+            already_disabled
+            | out_of_bounds
+            | ground_crash
+            | speed_limit
+            | angular_speed_limit
+            | no_target_left
+            | invalid_state
+            | contact
+        )
+        return DisableReasonFlags(
+            disabled,
+            already_disabled,
+            no_target_left,
+            speed_limit,
+            angular_speed_limit,
+            ground_crash,
+            out_of_bounds,
+            contact,
+            invalid_state,
+        )
+
+    @staticmethod
     def _disabled_drones(
         pos: Array,
         quat: Array,
@@ -972,21 +1057,7 @@ class RaceCoreEnv:
         contacts: Array,
         data: EnvData,
     ) -> Array:
-        ground_crash = pos[..., 2] <= 0.02
-        linear_speed = jnp.linalg.norm(vel, axis=-1)
-        angular_speed = jnp.linalg.norm(ang_vel, axis=-1)
-        speed_limit = linear_speed > data.max_linear_speed
-        angular_speed_limit = angular_speed > data.max_angular_speed
-        disabled = data.disabled_drones | jnp.any(pos < data.pos_limit_low, axis=-1)
-        disabled = disabled | jnp.any(pos > data.pos_limit_high, axis=-1)
-        disabled = disabled | ground_crash
-        disabled = disabled | speed_limit
-        disabled = disabled | angular_speed_limit
-        disabled = disabled | (data.target_gate == -1)
-        disabled = disabled | RaceCoreEnv._invalid_drone_state(pos, quat, vel, ang_vel)
-        contacts = jnp.any(contacts[:, None, :] & data.contact_masks, axis=-1)
-        disabled = disabled | contacts
-        return disabled
+        return RaceCoreEnv._disable_reason_flags(pos, quat, vel, ang_vel, contacts, data).disabled
 
     @staticmethod
     @jax.jit

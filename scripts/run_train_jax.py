@@ -9,6 +9,7 @@ from typing import Any, NamedTuple
 import fire
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 from flax import serialization
 from flax.training.train_state import TrainState
@@ -60,6 +61,26 @@ def make_metrics_table(metrics: dict[str, float | int]) -> Table:
         else:
             table.add_row(key, str(value))
     return table
+
+
+def completed_episode_stats(passed: np.ndarray, done: np.ndarray) -> tuple[float, float, int]:
+    """Return mean gates per completed episode and fraction completing >=1 gate."""
+    num_steps, num_envs = passed.shape
+    episode_gate_counts: list[int] = []
+    running_gate_counts = np.zeros(num_envs, dtype=np.int32)
+
+    for step_idx in range(num_steps):
+        running_gate_counts += passed[step_idx].astype(np.int32)
+        finished_envs = np.nonzero(done[step_idx])[0]
+        if finished_envs.size > 0:
+            episode_gate_counts.extend(running_gate_counts[finished_envs].tolist())
+            running_gate_counts[finished_envs] = 0
+
+    if not episode_gate_counts:
+        return 0.0, 0.0, 0
+
+    counts = np.asarray(episode_gate_counts, dtype=np.float32)
+    return float(counts.mean()), float((counts >= 1).mean()), int(counts.size)
 
 
 def scale_actions_jax(actions: jax.Array, action_low: jax.Array, action_high: jax.Array) -> jax.Array:
@@ -344,6 +365,9 @@ def run_train(
             "running_mean_reward": 0.0,
             "done_rate": 0.0,
             "avg_gates_passed": 0.0,
+            "episode_gates_mean": 0.0,
+            "episode_pass_rate": 0.0,
+            "episodes_completed": 0,
             "actor_loss": 0.0,
             "value_loss": 0.0,
             "entropy": 0.0,
@@ -362,7 +386,12 @@ def run_train(
                 )
                 rewards = jax.device_get(rollout.reward)
                 dones = jax.device_get(rollout.done)
+                passed = jax.device_get(rollout.passed)
                 epoch_metrics = jax.device_get(metrics)
+                episode_gates_mean, episode_pass_rate, episodes_completed = completed_episode_stats(
+                    passed,
+                    dones,
+                )
 
                 total_reward_sum += float(rewards.sum())
                 total_reward_count += int(rewards.size)
@@ -371,7 +400,10 @@ def run_train(
                     "mean_reward": float(rewards.mean()),
                     "running_mean_reward": total_reward_sum / total_reward_count,
                     "done_rate": float(dones.mean()),
-                    "avg_gates_passed": float(jax.device_get(rollout.passed.sum(axis=0).mean())),
+                    "avg_gates_passed": float(passed.sum(axis=0).mean()),
+                    "episode_gates_mean": episode_gates_mean,
+                    "episode_pass_rate": episode_pass_rate,
+                    "episodes_completed": episodes_completed,
                     "actor_loss": float(epoch_metrics["actor_loss"][-1]),
                     "value_loss": float(epoch_metrics["value_loss"][-1]),
                     "entropy": float(epoch_metrics["entropy"][-1]),

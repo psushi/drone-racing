@@ -10,4 +10,5 @@ __pycache__/
 
 # Training artifacts and local notes
 artifacts/
+!artifacts/policy_jax.msgpack
 ideas.txt
