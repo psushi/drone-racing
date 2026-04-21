@@ -109,6 +109,7 @@ def watch_policy(
         disturbances=cfg.env.get("disturbances"),
         randomizations=cfg.env.get("randomizations"),
         reward_config=cfg.env.get("reward"),
+        reset_config=cfg.env.get("reset"),
         seed=seed,
         device=device,
     )
