@@ -17,7 +17,7 @@ drone_model = "cf21B_500"
 num_steps = 192
 num_minibatches = 8
 num_envs = 64
-num_iterations = 3000
+num_iterations = 2000
 gamma = 0.99
 lambda_ = 0.95
 max_grad_norm = 0.5
@@ -45,21 +45,20 @@ control_mode = "attitude"
 
 [env.reward]
 progress_scale = 20.0
-safety_weight = 1.0
-ang_vel_penalty_scale = 0.01
-safety_weight = 1.5
+ang_vel_penalty_scale = 0.004
+safety_weight = 1.6
 gate_width = 0.4
 safety_activation_distance = 2.5
 crash_penalty = 5.0
 gate_pass_bonus = 5.0
 max_linear_speed = 8.0
 max_angular_speed = 25.0
-vel_penalty_scale = 0.08
+vel_penalty_scale = 0.05
 
 [env.reset]
 gate_indices = [0, 1, 2, 3]
-gate_probs = [0.45, 0.30, 0.17, 0.08]
-post_prev_prob = 0.5
+gate_probs = [0.45, 0.30, 0.17, 0.00]
+post_prev_prob = 0.7
 
 [env.track]
 randomize = false
