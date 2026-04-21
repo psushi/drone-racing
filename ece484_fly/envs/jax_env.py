@@ -133,6 +133,8 @@ class FunctionalJaxVecDroneRaceEnv:
         self._reset_gate_indices = jnp.asarray(self.env.reset_gate_indices, dtype=jnp.int32)
         self._reset_gate_probs = jnp.asarray(self.env.reset_gate_probs, dtype=jnp.float32)
         self._reset_post_prev_prob = float(self.env.reset_post_prev_prob)
+        self._reset_post_prev_speed = float(self.env.reset_post_prev_speed)
+        self._reset_pre_gate_speed = float(self.env.reset_pre_gate_speed)
 
         # Precompute a near-gate hover reset frame for every gate.
         gate_pos = np.asarray(self.env.gates["pos"], dtype=np.float32)
@@ -156,7 +158,7 @@ class FunctionalJaxVecDroneRaceEnv:
             env_data=self.env.data,
         )
 
-    def _sample_reset_state(self, key: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
+    def _sample_reset_state(self, key: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
         keys = jax.random.split(key, 5)
         logits = jnp.log(self._reset_gate_probs)
         gate_choice = jax.random.categorical(keys[3], logits, shape=(self.num_envs,))
@@ -191,7 +193,11 @@ class FunctionalJaxVecDroneRaceEnv:
             + lateral * reset_lateral
             + vertical * self._world_up
         )
-        return reset_pos, reset_quat, reset_target_gate
+        post_speed = jnp.asarray(self._reset_post_prev_speed, dtype=jnp.float32)
+        pre_speed = jnp.asarray(self._reset_pre_gate_speed, dtype=jnp.float32)
+        reset_speed = jnp.where(use_post_prev, post_speed, pre_speed)
+        reset_vel = reset_speed[:, None, None] * reset_forward
+        return reset_pos, reset_quat, reset_target_gate, reset_vel
 
     def _observe(self, state: FunctionalJaxVecEnvState) -> dict[str, jax.Array]:
         gates_pos, gates_quat, obstacles_pos = RaceCoreEnv._obs(
@@ -258,10 +264,10 @@ class FunctionalJaxVecDroneRaceEnv:
         key, subkey, subkey2 = jax.random.split(sim_data.core.rng_key, 3)
         sim_data = sim_data.replace(core=sim_data.core.replace(rng_key=key))
 
-        reset_pos, reset_quat, reset_target_gate = self._sample_reset_state(subkey)
+        reset_pos, reset_quat, reset_target_gate, reset_vel = self._sample_reset_state(subkey)
         pos = jnp.where(mask[:, None, None], reset_pos, sim_data.states.pos)
         quat = jnp.where(mask[:, None, None], reset_quat, sim_data.states.quat)
-        vel = jnp.where(mask[:, None, None], 0.0, sim_data.states.vel)
+        vel = jnp.where(mask[:, None, None], reset_vel, sim_data.states.vel)
         ang_vel = jnp.where(mask[:, None, None], 0.0, sim_data.states.ang_vel)
         sim_data = sim_data.replace(states=sim_data.states.replace(pos=pos, quat=quat, vel=vel, ang_vel=ang_vel))
         mjx_data = self.env.randomize_track(

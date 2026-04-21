@@ -402,6 +402,8 @@ class RaceCoreEnv:
         if not 0.0 <= post_prev_prob <= 1.0:
             raise ValueError("reset_config.post_prev_prob must be in [0, 1]")
         self.reset_post_prev_prob = post_prev_prob
+        self.reset_post_prev_speed = float(reset_cfg.get("post_prev_speed", 0.0))
+        self.reset_pre_gate_speed = float(reset_cfg.get("pre_gate_speed", 0.0))
 
         # Load the track into the simulation and compile the reset and step functions with hooks
         self._setup_sim(randomizations)
@@ -463,7 +465,7 @@ class RaceCoreEnv:
         self.gates, self.obstacles, self.drone = load_track(track)
         # Randomize the track
         self.sim.data = self.sim.data.replace(core=self.sim.data.core.replace(rng_key=key))
-        reset_pos, reset_quat, reset_target_gate = self._sample_reset_state(subkey)
+        reset_pos, reset_quat, reset_target_gate, reset_vel = self._sample_reset_state(subkey)
 
         @jax.jit
         def update_sim_data(
@@ -471,7 +473,7 @@ class RaceCoreEnv:
         ) -> tuple[SimData, Data]:
             pos = data.states.pos.at[...].set(reset_pos)
             quat = data.states.quat.at[...].set(reset_quat)
-            vel = data.states.vel.at[...].set(0.0)
+            vel = data.states.vel.at[...].set(reset_vel)
             ang_vel = data.states.ang_vel.at[...].set(0.0)
             data = data.replace(states=data.states.replace(pos=pos, quat=quat, vel=vel, ang_vel=ang_vel))
 
@@ -498,8 +500,8 @@ class RaceCoreEnv:
 
         return self.obs(), self.info()
 
-    def _sample_reset_state(self, key: jax.random.PRNGKey) -> tuple[Array, Array, Array]:
-        """Sample hover-like reset states before the target gate or just after the previous gate."""
+    def _sample_reset_state(self, key: jax.random.PRNGKey) -> tuple[Array, Array, Array, Array]:
+        """Sample reset states before the target gate or just after the previous gate."""
         gate_pos = jnp.asarray(self.gates["pos"], dtype=jnp.float32)
         gate_quat = jnp.asarray(self.gates["quat"], dtype=jnp.float32)
         gate_forward = jax.vmap(self._quat_apply, in_axes=(0, 0))(
@@ -552,7 +554,11 @@ class RaceCoreEnv:
             + lateral * gate_lateral
             + vertical * np.array([0.0, 0.0, 1.0], dtype=np.float32).reshape((1, 1, 3))
         )
-        return hover_pos, gate_quat, reset_target_gate
+        post_speed = jnp.asarray(self.reset_post_prev_speed, dtype=jnp.float32)
+        pre_speed = jnp.asarray(self.reset_pre_gate_speed, dtype=jnp.float32)
+        reset_speed = jnp.where(use_post_prev, post_speed, pre_speed)
+        reset_vel = reset_speed[:, None, None] * gate_forward
+        return hover_pos, gate_quat, reset_target_gate, reset_vel
 
     def _step(self, action: Array) -> tuple[dict[str, Array], float, bool, bool, dict]:
         """Step the firmware_wrapper class and its environment.

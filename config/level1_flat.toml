@@ -57,8 +57,10 @@ vel_penalty_scale = 0.05
 
 [env.reset]
 gate_indices = [0, 1, 2, 3]
-gate_probs = [0.45, 0.30, 0.17, 0.00]
+gate_probs = [0.45, 0.30, 0.17, 0.08]
 post_prev_prob = 0.7
+post_prev_speed = 2.0
+pre_gate_speed = 0.0
 
 [env.track]
 randomize = false
