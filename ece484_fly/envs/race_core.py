@@ -113,6 +113,8 @@ class EnvData:
     crash_penalty: Array
     gate_pass_bonus: Array
     vel_penalty_scale: Array
+    max_linear_speed: Array
+    max_angular_speed: Array
 
     @classmethod
     def create(
@@ -136,6 +138,8 @@ class EnvData:
         crash_penalty: float,
         gate_pass_bonus: float,
         vel_penalty_scale: float,
+        max_linear_speed: float,
+        max_angular_speed: float,
         device: Device,
     ) -> EnvData:
         """Create a new environment data struct with default values."""
@@ -169,6 +173,8 @@ class EnvData:
             crash_penalty=jnp.array([crash_penalty], dtype=jnp.float32, device=device),
             gate_pass_bonus=jnp.array([gate_pass_bonus], dtype=jnp.float32, device=device),
             vel_penalty_scale=jnp.array([vel_penalty_scale], dtype=jnp.float32, device=device),
+            max_linear_speed=jnp.array([max_linear_speed], dtype=jnp.float32, device=device),
+            max_angular_speed=jnp.array([max_angular_speed], dtype=jnp.float32, device=device),
         )
 
 
@@ -355,6 +361,8 @@ class RaceCoreEnv:
             "crash_penalty": float(reward_cfg.get("crash_penalty", 5.0)),
             "gate_pass_bonus": float(reward_cfg.get("gate_pass_bonus", 5.0)),
             "vel_penalty_scale": float(reward_cfg.get("vel_penalty_scale", 0.01)),
+            "max_linear_speed": float(reward_cfg.get("max_linear_speed", 8.0)),
+            "max_angular_speed": float(reward_cfg.get("max_angular_speed", 20.0)),
         }
         reset_cfg = {} if reset_config is None else reset_config
         n_gates_total = len(track.gates)
@@ -411,6 +419,8 @@ class RaceCoreEnv:
             crash_penalty=self.reward_config["crash_penalty"],
             gate_pass_bonus=self.reward_config["gate_pass_bonus"],
             vel_penalty_scale=self.reward_config["vel_penalty_scale"],
+            max_linear_speed=self.reward_config["max_linear_speed"],
+            max_angular_speed=self.reward_config["max_angular_speed"],
             device=self.device,
         )
         self.randomize_track = build_track_randomization_fn(randomizations, gate_ids, obstacle_ids)
@@ -963,9 +973,15 @@ class RaceCoreEnv:
         data: EnvData,
     ) -> Array:
         ground_crash = pos[..., 2] <= 0.02
+        linear_speed = jnp.linalg.norm(vel, axis=-1)
+        angular_speed = jnp.linalg.norm(ang_vel, axis=-1)
+        speed_limit = linear_speed > data.max_linear_speed
+        angular_speed_limit = angular_speed > data.max_angular_speed
         disabled = data.disabled_drones | jnp.any(pos < data.pos_limit_low, axis=-1)
         disabled = disabled | jnp.any(pos > data.pos_limit_high, axis=-1)
         disabled = disabled | ground_crash
+        disabled = disabled | speed_limit
+        disabled = disabled | angular_speed_limit
         disabled = disabled | (data.target_gate == -1)
         disabled = disabled | RaceCoreEnv._invalid_drone_state(pos, quat, vel, ang_vel)
         contacts = jnp.any(contacts[:, None, :] & data.contact_masks, axis=-1)

@@ -52,6 +52,8 @@ safety_activation_distance = 2.5
 crash_penalty = 5.0
 gate_pass_bonus = 5.0
 vel_penalty_scale = 0.02
+max_linear_speed = 8.0
+max_angular_speed = 20.0
 
 [env.reset]
 gate_indices = [0, 1, 2, 3]
