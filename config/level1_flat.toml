@@ -28,10 +28,12 @@ physics = "so_rpy_rotor_drag"
 [train]
 clip_eps = 0.2
 ent_coef = 0.005
+ent_anneal_iters = 2700
 gamma = 0.99
 lambda_ = 0.95
 lr = 0.0003
 max_grad_norm = 0.5
+min_ent_coef = 0.0005
 num_envs = 128
 num_epochs = 4
 num_iterations = 2800
