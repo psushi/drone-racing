@@ -304,6 +304,10 @@ def run_train(
     print("JAX devices:", jax.devices())
     print("Using device:", device)
     print(f"Using config: {resolved_config_path}")
+    ent_anneal_iters = int(cfg.train.get("ent_anneal_iters", cfg.train.num_iterations))
+    min_ent_coef = float(cfg.train.get("min_ent_coef", 5e-4))
+    if ent_anneal_iters <= 0:
+        raise ValueError(f"train.ent_anneal_iters must be positive, got {ent_anneal_iters}")
 
     env = FunctionalJaxVecDroneRaceEnv(
         config=str(resolved_config_path),
@@ -317,6 +321,7 @@ def run_train(
         f"num_envs={env.num_envs}",
         f"num_steps={cfg.train.num_steps}",
         f"transitions_per_iter={transitions_per_iter}",
+        f"ent_anneal_iters={ent_anneal_iters}",
     )
     sidecar_config_path, sidecar_metadata_path = write_experiment_sidecar(
         checkpoint_path=checkpoint_path,
@@ -368,6 +373,8 @@ def run_train(
                     "num_envs_effective": env.num_envs,
                     "transitions_per_iter": transitions_per_iter,
                     "policy_obs_dim": POLICY_OBS_DIM,
+                    "ent_anneal_iters_effective": ent_anneal_iters,
+                    "min_ent_coef_effective": min_ent_coef,
                 },
             )
 
@@ -411,11 +418,11 @@ def run_train(
         }
         with Live(make_metrics_table(live_metrics), refresh_per_second=4) as live:
             for iter_idx in range(cfg.train.num_iterations):
-                progress = iter_idx / max(cfg.train.num_iterations - 1, 1)
+                anneal_progress = min(iter_idx / max(ent_anneal_iters - 1, 1), 1.0)
                 # Front-load exploration, then decay aggressively so the policy can
-                # consolidate once it starts reliably passing gates.
-                min_ent_coef = 5e-4
-                ent_decay = (1.0 - progress) ** 2
+                # consolidate once it starts reliably passing gates. Annealing is
+                # decoupled from total run length so short and long runs are comparable.
+                ent_decay = (1.0 - anneal_progress) ** 2
                 current_ent_coef = min_ent_coef + (cfg.train.ent_coef - min_ent_coef) * ent_decay
                 runner_state, rollout, metrics = train_iteration(
                     runner_state, jnp.asarray(current_ent_coef, dtype=jnp.float32)
