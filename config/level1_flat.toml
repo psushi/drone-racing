@@ -27,7 +27,7 @@ physics = "so_rpy_rotor_drag"
 
 [train]
 clip_eps = 0.2
-ent_coef = 0.005
+ent_coef = 0.003
 gamma = 0.99
 lambda_ = 0.95
 lr = 0.0003
@@ -44,6 +44,7 @@ bank_path = "artifacts/low-cen-gate/reset_bank.npz"
 bank_prob = 0.0
 gate_indices = [ 0, 1, 2, 3,]
 gate_probs = [ 0.22, 0.3, 0.33, 0.15,]
+# gate_probs = [1.0, 0.0, 0.0, 0.0]
 post_prev_distance_max = 0.95
 post_prev_distance_min = 0.35
 post_prev_prob = 0.7
@@ -63,7 +64,7 @@ perception_distance_scale = 1.0
 perception_weight = 0.35
 progress_scale = 30.0
 safety_activation_distance = 2.5
-safety_weight = 0.5
+safety_weight = 0.0
 vel_penalty_scale = 0.01
 
 [env.track]
