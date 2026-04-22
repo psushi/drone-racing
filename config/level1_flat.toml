@@ -55,6 +55,7 @@ yaw_jitter = 0.15
 
 [env.reward]
 ang_vel_penalty_scale = 0.004
+completion_bonus = 5.0
 crash_penalty = 5.0
 gate_pass_bonus = 5.0
 gate_width = 0.4
@@ -64,7 +65,7 @@ perception_distance_scale = 1.0
 perception_weight = 0.35
 progress_scale = 30.0
 safety_activation_distance = 2.5
-safety_weight = 0.0
+safety_weight = 1.5
 vel_penalty_scale = 0.01
 
 [env.track]

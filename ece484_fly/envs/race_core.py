@@ -114,6 +114,7 @@ class EnvData:
     safety_activation_distance: Array
     crash_penalty: Array
     gate_pass_bonus: Array
+    completion_bonus: Array
     vel_penalty_scale: Array
     max_linear_speed: Array
     max_angular_speed: Array
@@ -141,6 +142,7 @@ class EnvData:
         safety_activation_distance: float,
         crash_penalty: float,
         gate_pass_bonus: float,
+        completion_bonus: float,
         vel_penalty_scale: float,
         max_linear_speed: float,
         max_angular_speed: float,
@@ -180,6 +182,7 @@ class EnvData:
             ),
             crash_penalty=jnp.array([crash_penalty], dtype=jnp.float32, device=device),
             gate_pass_bonus=jnp.array([gate_pass_bonus], dtype=jnp.float32, device=device),
+            completion_bonus=jnp.array([completion_bonus], dtype=jnp.float32, device=device),
             vel_penalty_scale=jnp.array([vel_penalty_scale], dtype=jnp.float32, device=device),
             max_linear_speed=jnp.array([max_linear_speed], dtype=jnp.float32, device=device),
             max_angular_speed=jnp.array([max_angular_speed], dtype=jnp.float32, device=device),
@@ -385,6 +388,7 @@ class RaceCoreEnv:
             ),
             "crash_penalty": float(reward_cfg.get("crash_penalty", 5.0)),
             "gate_pass_bonus": float(reward_cfg.get("gate_pass_bonus", 5.0)),
+            "completion_bonus": float(reward_cfg.get("completion_bonus", 0.0)),
             "vel_penalty_scale": float(reward_cfg.get("vel_penalty_scale", 0.01)),
             "max_linear_speed": float(reward_cfg.get("max_linear_speed", 8.0)),
             "max_angular_speed": float(reward_cfg.get("max_angular_speed", 20.0)),
@@ -482,6 +486,7 @@ class RaceCoreEnv:
             safety_activation_distance=self.reward_config["safety_activation_distance"],
             crash_penalty=self.reward_config["crash_penalty"],
             gate_pass_bonus=self.reward_config["gate_pass_bonus"],
+            completion_bonus=self.reward_config["completion_bonus"],
             vel_penalty_scale=self.reward_config["vel_penalty_scale"],
             max_linear_speed=self.reward_config["max_linear_speed"],
             max_angular_speed=self.reward_config["max_angular_speed"],
@@ -944,6 +949,7 @@ class RaceCoreEnv:
         safety_activation_distance: Array,
         crash_penalty: Array,
         gate_pass_bonus: Array,
+        completion_bonus: Array,
         vel_penalty_scale: Array,
     ) -> Array:
         """Compute the transition reward for the current step."""
@@ -1003,6 +1009,7 @@ class RaceCoreEnv:
             + perception_reward
             + safety_weight * safety_reward
             # + gate_pass_bonus * passed.astype(jnp.float32)
+            + completion_bonus * course_complete.astype(jnp.float32)
             - ang_vel_penalty
             - vel_penalty
             - crash_penalty * newly_disabled.astype(jnp.float32)
@@ -1068,6 +1075,7 @@ class RaceCoreEnv:
             data.safety_activation_distance,
             data.crash_penalty,
             data.gate_pass_bonus,
+            data.completion_bonus,
             data.vel_penalty_scale,
         )
         # Update the target gate index. Increment by one if drones have passed a gate
