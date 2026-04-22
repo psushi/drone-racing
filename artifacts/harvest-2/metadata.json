@@ -1,0 +1,33 @@
+{
+  "best_metrics": {
+    "best_avg_gates_passed": 3.359375,
+    "best_episode_gates_mean": 1.6399999856948853,
+    "best_episode_pass_rate": 0.9182389937106918,
+    "best_running_mean_reward": 0.423269600994885
+  },
+  "checkpoint_path": "/root/drone-track-wayno2/artifacts/harvest-2/model.msgpack",
+  "completed_iterations": 3000,
+  "config_path": "/root/drone-track-wayno2/artifacts/harvest-2/config.toml",
+  "device": "gpu",
+  "final_metrics": {
+    "actor_loss": 0.00010689854389056563,
+    "avg_gates_passed": 2.9453125,
+    "done_rate": 0.006510416666666667,
+    "ent_coef": 0.0005,
+    "entropy": -3.8415040969848633,
+    "episode_gates_mean": 1.443750023841858,
+    "episode_pass_rate": 0.8625,
+    "episodes_completed": 160,
+    "iteration": 2999,
+    "mean_reward": 0.4974028170108795,
+    "running_mean_reward": 0.423269600994885,
+    "value_loss": 0.9850705862045288
+  },
+  "final_running_mean_reward": 0.423269600994885,
+  "git_commit": "bc147f2b39768a2a5fc8bfc4488cdd771d1b6200",
+  "num_envs_effective": 128,
+  "saved_at_utc": "2026-04-22T05:10:47.693879+00:00",
+  "seed": 0,
+  "source_config_path": "/root/drone-track-wayno2/config/level1_flat.toml",
+  "transitions_per_iter": 24576
+}
