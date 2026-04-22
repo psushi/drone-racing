@@ -48,6 +48,7 @@ class RolloutBatch(NamedTuple):
     terminated: jax.Array
     done: jax.Array
     passed: jax.Array
+    task_complete: jax.Array
 
 
 class RunnerState(NamedTuple):
@@ -69,10 +70,15 @@ def make_metrics_table(metrics: dict[str, float | int]) -> Table:
     return table
 
 
-def completed_episode_stats(passed: np.ndarray, done: np.ndarray) -> tuple[float, float, int]:
-    """Return mean gates per completed episode and fraction completing >=1 gate."""
+def completed_episode_stats(
+    passed: np.ndarray,
+    done: np.ndarray,
+    task_complete: np.ndarray,
+) -> tuple[float, float, float, int]:
+    """Return completed-episode gate stats and task completion reliability."""
     num_steps, num_envs = passed.shape
     episode_gate_counts: list[int] = []
+    episode_task_success: list[bool] = []
     running_gate_counts = np.zeros(num_envs, dtype=np.int32)
 
     for step_idx in range(num_steps):
@@ -80,13 +86,15 @@ def completed_episode_stats(passed: np.ndarray, done: np.ndarray) -> tuple[float
         finished_envs = np.nonzero(done[step_idx])[0]
         if finished_envs.size > 0:
             episode_gate_counts.extend(running_gate_counts[finished_envs].tolist())
+            episode_task_success.extend(task_complete[step_idx, finished_envs].astype(bool).tolist())
             running_gate_counts[finished_envs] = 0
 
     if not episode_gate_counts:
-        return 0.0, 0.0, 0
+        return 0.0, 0.0, 0.0, 0
 
     counts = np.asarray(episode_gate_counts, dtype=np.float32)
-    return float(counts.mean()), float((counts >= 1).mean()), int(counts.size)
+    success = np.asarray(episode_task_success, dtype=bool)
+    return float(counts.mean()), float((counts >= 1).mean()), float(success.mean()), int(counts.size)
 
 
 def scale_actions_jax(actions: jax.Array, action_low: jax.Array, action_high: jax.Array) -> jax.Array:
@@ -218,6 +226,7 @@ def make_collect_rollout_fn(
                 terminated=terminated,
                 done=done,
                 passed=info["passed"],
+                task_complete=info["final_observation"]["target_gate"] == -1,
             )
             next_carry = RunnerState(train_state, env_state, next_obs, rng)
             return next_carry, transition
@@ -399,6 +408,7 @@ def run_train(
         "best_avg_gates_passed": float("-inf"),
         "best_episode_gates_mean": float("-inf"),
         "best_episode_pass_rate": float("-inf"),
+        "best_completion_reliability": float("-inf"),
         "best_running_mean_reward": float("-inf"),
     }
     try:
@@ -410,6 +420,7 @@ def run_train(
             "avg_gates_passed": 0.0,
             "episode_gates_mean": 0.0,
             "episode_pass_rate": 0.0,
+            "completion_reliability": 0.0,
             "episodes_completed": 0,
             "actor_loss": 0.0,
             "value_loss": 0.0,
@@ -430,10 +441,17 @@ def run_train(
                 rewards = jax.device_get(rollout.reward)
                 dones = jax.device_get(rollout.done)
                 passed = jax.device_get(rollout.passed)
+                task_complete = jax.device_get(rollout.task_complete)
                 epoch_metrics = jax.device_get(metrics)
-                episode_gates_mean, episode_pass_rate, episodes_completed = completed_episode_stats(
+                (
+                    episode_gates_mean,
+                    episode_pass_rate,
+                    completion_reliability,
+                    episodes_completed,
+                ) = completed_episode_stats(
                     passed,
                     dones,
+                    task_complete,
                 )
 
                 total_reward_sum += float(rewards.sum())
@@ -446,6 +464,7 @@ def run_train(
                     "avg_gates_passed": float(passed.sum(axis=0).mean()),
                     "episode_gates_mean": episode_gates_mean,
                     "episode_pass_rate": episode_pass_rate,
+                    "completion_reliability": completion_reliability,
                     "episodes_completed": episodes_completed,
                     "actor_loss": float(epoch_metrics["actor_loss"][-1]),
                     "value_loss": float(epoch_metrics["value_loss"][-1]),
@@ -464,6 +483,10 @@ def run_train(
                 best_metrics["best_episode_pass_rate"] = max(
                     best_metrics["best_episode_pass_rate"],
                     live_metrics["episode_pass_rate"],
+                )
+                best_metrics["best_completion_reliability"] = max(
+                    best_metrics["best_completion_reliability"],
+                    live_metrics["completion_reliability"],
                 )
                 best_metrics["best_running_mean_reward"] = max(
                     best_metrics["best_running_mean_reward"],
