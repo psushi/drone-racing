@@ -102,9 +102,13 @@ def _reward_terms(
     gate_view_alignment = float(np.dot(drone_forward, safe_gate_dir))
     prev_perception_distance_gain = float(np.tanh(prev_gate_dist / max(perception_distance_scale, 1e-6)))
     perception_distance_gain = float(np.tanh(curr_gate_dist / max(perception_distance_scale, 1e-6)))
-    perception_reward = perception_weight * (
+    absolute_centering = perception_distance_gain * gate_view_alignment
+    differential_centering = (
         perception_distance_gain * gate_view_alignment
         - prev_perception_distance_gain * prev_gate_view_alignment
+    )
+    perception_reward = perception_weight * (
+        0.75 * absolute_centering + 0.25 * differential_centering
     )
 
     gate_normal = _quat_apply_np(gate_quat, np.array([1.0, 0.0, 0.0], dtype=np.float32))

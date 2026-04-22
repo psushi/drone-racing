@@ -917,9 +917,15 @@ class RaceCoreEnv:
         perception_distance_gain = jnp.tanh(
             curr_gate_dist / jnp.maximum(perception_distance_scale, 1e-6)
         )
-        perception_reward = perception_weight * (
+        absolute_centering = perception_distance_gain * gate_view_alignment
+        differential_centering = (
             perception_distance_gain * gate_view_alignment
             - prev_perception_distance_gain * prev_gate_view_alignment
+        )
+        # Keep one centering knob. Most of the term is persistent centering,
+        # with a smaller differential component to avoid static camping.
+        perception_reward = perception_weight * (
+            0.75 * absolute_centering + 0.25 * differential_centering
         )
 
         gate_normal = RaceCoreEnv._quat_apply(
