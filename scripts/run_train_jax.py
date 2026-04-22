@@ -404,6 +404,8 @@ def run_train(
     total_reward_sum = 0.0
     total_reward_count = 0
     final_metrics: dict[str, float | int] = {}
+    best_checkpoint_iteration = -1
+    best_checkpoint_reliability = float("-inf")
     best_metrics = {
         "best_avg_gates_passed": float("-inf"),
         "best_episode_gates_mean": float("-inf"),
@@ -412,6 +414,9 @@ def run_train(
         "best_running_mean_reward": float("-inf"),
     }
     try:
+        checkpoint_file = Path(checkpoint_path)
+        checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
+        final_checkpoint_file = checkpoint_file.with_name(f"{checkpoint_file.stem}.final{checkpoint_file.suffix}")
         live_metrics = {
             "iteration": 0,
             "mean_reward": 0.0,
@@ -492,6 +497,10 @@ def run_train(
                     best_metrics["best_running_mean_reward"],
                     live_metrics["running_mean_reward"],
                 )
+                if live_metrics["completion_reliability"] > best_checkpoint_reliability:
+                    best_checkpoint_reliability = live_metrics["completion_reliability"]
+                    best_checkpoint_iteration = iter_idx
+                    checkpoint_file.write_bytes(serialization.to_bytes(runner_state.train_state.params))
                 if wandb_run is not None:
                     wandb_run.log(
                         {
@@ -504,9 +513,7 @@ def run_train(
                 live.update(make_metrics_table(live_metrics))
 
         print(f"Final running mean reward: {total_reward_sum / total_reward_count:.4f}")
-        checkpoint_file = Path(checkpoint_path)
-        checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
-        checkpoint_file.write_bytes(serialization.to_bytes(runner_state.train_state.params))
+        final_checkpoint_file.write_bytes(serialization.to_bytes(runner_state.train_state.params))
         write_experiment_sidecar(
             checkpoint_path=checkpoint_path,
             resolved_config_path=resolved_config_path,
@@ -523,9 +530,14 @@ def run_train(
                 "final_running_mean_reward": total_reward_sum / total_reward_count,
                 "final_metrics": final_metrics,
                 "best_metrics": best_metrics,
+                "best_checkpoint_iteration": best_checkpoint_iteration,
+                "best_checkpoint_reliability": best_checkpoint_reliability,
+                "best_checkpoint_path": str(checkpoint_file),
+                "final_checkpoint_path": str(final_checkpoint_file),
             },
         )
-        print(f"Saved checkpoint to {checkpoint_file}")
+        print(f"Saved best checkpoint to {checkpoint_file}")
+        print(f"Saved final checkpoint to {final_checkpoint_file}")
     finally:
         if wandb_run is not None:
             wandb_run.finish()
