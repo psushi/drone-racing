@@ -58,6 +58,7 @@ class JaxVecDroneRaceEnv:
             reward_config=cfg.env.get("reward"),
             reset_config=cfg.env.get("reset"),
             seed=seed,
+            max_episode_steps=int(cfg.env.get("max_episode_steps", 1500)),
             device=device,
         )
         self.num_envs = self.env.num_envs
@@ -112,6 +113,7 @@ class FunctionalJaxVecDroneRaceEnv:
             reward_config=cfg.env.get("reward"),
             reset_config=cfg.env.get("reset"),
             seed=seed,
+            max_episode_steps=int(cfg.env.get("max_episode_steps", 1500)),
             device=device,
         )
         if self.env.track.randomize:
