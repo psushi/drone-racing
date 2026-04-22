@@ -41,7 +41,7 @@ vf_coef = 0.5
 
 [env.reset]
 bank_path = "artifacts/low-cen-gate/reset_bank.npz"
-bank_prob = 1.0
+bank_prob = 0.4
 gate_indices = [ 0, 1, 2, 3,]
 gate_probs = [ 0.45, 0.3, 0.17, 0.08,]
 post_prev_distance_max = 0.95
