@@ -67,11 +67,11 @@ def _install_reset_shift(env, forward: float, lateral: float, vertical: float) -
 
 
 def _reward_terms(
-    segment_start_pos: np.ndarray,
     last_pos: np.ndarray,
     pos: np.ndarray,
     vel: np.ndarray,
     ang_vel: np.ndarray,
+    quat: np.ndarray,
     gate_pos: np.ndarray,
     gate_quat: np.ndarray,
     passed: bool,
@@ -79,12 +79,8 @@ def _reward_terms(
     prev_disabled: bool,
     reward_cfg: dict[str, float],
 ) -> dict[str, float]:
-    def segment_progress_coordinate(pos_along_segment: float, segment_length: float) -> float:
-        if pos_along_segment <= segment_length:
-            return pos_along_segment
-        return 2.0 * segment_length - pos_along_segment
-
     progress_scale = reward_cfg["progress_scale"]
+    perception_weight = reward_cfg["perception_weight"]
     safety_weight = reward_cfg["safety_weight"]
     ang_vel_penalty_scale = reward_cfg["ang_vel_penalty_scale"]
     gate_width = reward_cfg["gate_width"]
@@ -93,14 +89,15 @@ def _reward_terms(
     gate_pass_bonus = reward_cfg["gate_pass_bonus"]
     vel_penalty_scale = reward_cfg["vel_penalty_scale"]
 
-    segment_dir = gate_pos - segment_start_pos
-    segment_dir_norm = float(np.linalg.norm(segment_dir))
-    safe_segment_dir = segment_dir / max(segment_dir_norm, 1e-6)
-    s_prev = float(np.dot(last_pos - segment_start_pos, safe_segment_dir))
-    s_curr = float(np.dot(pos - segment_start_pos, safe_segment_dir))
-    shaped_s_prev = segment_progress_coordinate(s_prev, segment_dir_norm)
-    shaped_s_curr = segment_progress_coordinate(s_curr, segment_dir_norm)
-    progress_reward = progress_scale * (shaped_s_curr - shaped_s_prev)
+    prev_gate_offset = gate_pos - last_pos
+    curr_gate_offset = gate_pos - pos
+    prev_gate_dist = float(np.linalg.norm(prev_gate_offset))
+    curr_gate_dist = float(np.linalg.norm(curr_gate_offset))
+    progress_reward = progress_scale * (prev_gate_dist - curr_gate_dist)
+    safe_gate_dir = curr_gate_offset / max(curr_gate_dist, 1e-6)
+    drone_forward = _quat_apply_np(quat, np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    gate_view_alignment = float(np.dot(drone_forward, safe_gate_dir))
+    perception_reward = perception_weight * gate_view_alignment
 
     gate_normal = _quat_apply_np(gate_quat, np.array([1.0, 0.0, 0.0], dtype=np.float32))
     rel_gate = pos - gate_pos
@@ -116,10 +113,12 @@ def _reward_terms(
 
     if disabled:
         progress_reward = 0.0
+        perception_reward = 0.0
         safety_reward = 0.0
 
     total = (
         progress_reward
+        + perception_reward
         + safety_weight * safety_reward
         + gate_pass_bonus * float(passed)
         - ang_vel_penalty
@@ -128,13 +127,14 @@ def _reward_terms(
     )
     return {
         "progress": progress_reward,
+        "perception": perception_reward,
         "safety": safety_reward,
         "gate": gate_pass_bonus * float(passed),
         "ang_vel": -ang_vel_penalty,
         "vel": -vel_penalty,
         "crash": -crash_penalty * newly_disabled,
         "total": total,
-        "curr_target_dist": float(np.linalg.norm(pos - gate_pos)),
+        "curr_target_dist": curr_gate_dist,
         "plane_distance": plane_distance,
         "lateral_offset": lateral_offset,
         "target_pos_z": float(gate_pos[2]),
@@ -143,7 +143,7 @@ def _reward_terms(
 
 def debug_reward_attitude(
     checkpoint_path: str = "artifacts/policy_jax/model.msgpack",
-    config: str = "level1.toml",
+    config: str = "level1_flat.toml",
     seed: int = 0,
     pause: bool = False,
     device: str = "auto",
@@ -177,6 +177,9 @@ def debug_reward_attitude(
     reward_cfg = cfg.env.get("reward") or {}
     reward_params = {
         "progress_scale": float(reward_cfg.get("progress_scale", 10.0)),
+        "perception_weight": float(
+            reward_cfg.get("perception_weight", reward_cfg.get("alignment_weight", 1.0))
+        ),
         "safety_weight": float(reward_cfg.get("safety_weight", 1.0)),
         "ang_vel_penalty_scale": float(reward_cfg.get("ang_vel_penalty_scale", 0.01)),
         "gate_width": float(reward_cfg.get("gate_width", 0.4)),
@@ -245,6 +248,7 @@ def debug_reward_attitude(
                 env.render()
 
             pos = np.asarray(obs["pos"], dtype=np.float32)
+            quat = np.asarray(obs["quat"], dtype=np.float32)
             vel = np.asarray(obs["vel"], dtype=np.float32)
             ang_vel = np.asarray(obs["ang_vel"], dtype=np.float32)
             disabled = bool(terminated or truncated)
@@ -261,11 +265,11 @@ def debug_reward_attitude(
             )
 
             terms = _reward_terms(
-                segment_start_pos,
                 last_pos,
                 pos,
                 vel,
                 ang_vel,
+                quat,
                 gate_pos,
                 gate_quat,
                 passed,
@@ -281,7 +285,8 @@ def debug_reward_attitude(
                 )
                 print(
                     "  "
-                    f"progress={terms['progress']:+.4f} safety={terms['safety']:+.4f} "
+                    f"progress={terms['progress']:+.4f} perception={terms['perception']:+.4f} "
+                    f"safety={terms['safety']:+.4f} "
                     f"gate={terms['gate']:+.1f}"
                 )
                 print(

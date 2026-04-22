@@ -282,7 +282,7 @@ def make_train_iteration_fn(
 
 
 def run_train(
-    config: str = "level1.toml",
+    config: str = "level1_flat.toml",
     num_envs: int = 100,
     seed: int = 0,
     checkpoint_path: str = "artifacts/policy_jax/model.msgpack",

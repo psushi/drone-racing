@@ -106,6 +106,7 @@ class EnvData:
     sensor_range: Array
     rewards: Array
     progress_scale: Array
+    perception_weight: Array
     safety_weight: Array
     ang_vel_penalty_scale: Array
     gate_width: Array
@@ -131,6 +132,7 @@ class EnvData:
         pos_limit_low: Array,
         pos_limit_high: Array,
         progress_scale: float,
+        perception_weight: float,
         safety_weight: float,
         ang_vel_penalty_scale: float,
         gate_width: float,
@@ -162,6 +164,7 @@ class EnvData:
             sensor_range=jnp.array([sensor_range], dtype=jnp.float32, device=device),
             rewards=jnp.zeros((n_envs, n_drones), dtype=jnp.float32, device=device),
             progress_scale=jnp.array([progress_scale], dtype=jnp.float32, device=device),
+            perception_weight=jnp.array([perception_weight], dtype=jnp.float32, device=device),
             safety_weight=jnp.array([safety_weight], dtype=jnp.float32, device=device),
             ang_vel_penalty_scale=jnp.array(
                 [ang_vel_penalty_scale], dtype=jnp.float32, device=device
@@ -365,6 +368,9 @@ class RaceCoreEnv:
         reward_cfg = {} if reward_config is None else reward_config
         self.reward_config = {
             "progress_scale": float(reward_cfg.get("progress_scale", 10.0)),
+            "perception_weight": float(
+                reward_cfg.get("perception_weight", reward_cfg.get("alignment_weight", 1.0))
+            ),
             "safety_weight": float(reward_cfg.get("safety_weight", 1.0)),
             "ang_vel_penalty_scale": float(reward_cfg.get("ang_vel_penalty_scale", 0.01)),
             "gate_width": float(reward_cfg.get("gate_width", 0.4)),
@@ -435,6 +441,7 @@ class RaceCoreEnv:
             pos_limit_low=[-3, -3, -1e-3],
             pos_limit_high=[3, 3, 2.5],
             progress_scale=self.reward_config["progress_scale"],
+            perception_weight=self.reward_config["perception_weight"],
             safety_weight=self.reward_config["safety_weight"],
             ang_vel_penalty_scale=self.reward_config["ang_vel_penalty_scale"],
             gate_width=self.reward_config["gate_width"],
@@ -872,6 +879,7 @@ class RaceCoreEnv:
         normalized_action: Array,
         prev_action: Array,
         progress_scale: Array,
+        perception_weight: Array,
         safety_weight: Array,
         ang_vel_penalty_scale: Array,
         gate_width: Array,
@@ -881,24 +889,19 @@ class RaceCoreEnv:
         vel_penalty_scale: Array,
     ) -> Array:
         """Compute the transition reward for the current step."""
-        def segment_progress_coordinate(pos_along_segment: Array, segment_length: Array) -> Array:
-            # Reward forward motion up to the gate, then flip the incentive if the drone
-            # continues past the gate without actually crossing it.
-            return jnp.where(
-                pos_along_segment <= segment_length,
-                pos_along_segment,
-                2.0 * segment_length - pos_along_segment,
-            )
+        prev_gate_offset = gate_pos - last_drone_pos
+        curr_gate_offset = gate_pos - drone_pos
+        prev_gate_dist = jnp.linalg.norm(prev_gate_offset, axis=-1)
+        curr_gate_dist = jnp.linalg.norm(curr_gate_offset, axis=-1)
+        distance_progress = progress_scale * (prev_gate_dist - curr_gate_dist)
 
-        segment_dir = gate_pos - segment_start_pos
-        segment_dir_norm = jnp.linalg.norm(segment_dir, axis=-1, keepdims=True)
-        safe_segment_dir = segment_dir / jnp.maximum(segment_dir_norm, 1e-6)
-        segment_length = jnp.squeeze(segment_dir_norm, axis=-1)
-        s_prev = jnp.sum((last_drone_pos - segment_start_pos) * safe_segment_dir, axis=-1)
-        s_curr = jnp.sum((drone_pos - segment_start_pos) * safe_segment_dir, axis=-1)
-        shaped_s_prev = segment_progress_coordinate(s_prev, segment_length)
-        shaped_s_curr = segment_progress_coordinate(s_curr, segment_length)
-        segment_progress = progress_scale * (shaped_s_curr - shaped_s_prev)
+        safe_gate_dir = curr_gate_offset / jnp.maximum(curr_gate_dist[..., None], 1e-6)
+        drone_forward = RaceCoreEnv._quat_apply(
+            drone_quat,
+            jnp.broadcast_to(jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32), drone_pos.shape),
+        )
+        gate_view_alignment = jnp.sum(drone_forward * safe_gate_dir, axis=-1)
+        perception_reward = perception_weight * gate_view_alignment
 
         gate_normal = RaceCoreEnv._quat_apply(
             gate_quat,
@@ -916,11 +919,13 @@ class RaceCoreEnv:
         ang_vel_penalty = ang_vel_penalty_scale * jnp.linalg.norm(drone_ang_vel, axis=-1)
         vel_penalty = vel_penalty_scale * jnp.linalg.norm(drone_vel, axis=-1)
 
-        segment_progress = jnp.where(disabled_drones, 0.0, segment_progress)
+        distance_progress = jnp.where(disabled_drones, 0.0, distance_progress)
+        perception_reward = jnp.where(disabled_drones, 0.0, perception_reward)
         safety_reward = jnp.where(disabled_drones, 0.0, safety_reward)
         newly_disabled = disabled_drones & ~prev_disabled_drones
         return (
-            segment_progress
+            distance_progress
+            + perception_reward
             + safety_weight * safety_reward
             # + gate_pass_bonus * passed.astype(jnp.float32)
             - ang_vel_penalty
@@ -980,6 +985,7 @@ class RaceCoreEnv:
             normalized_action,
             data.last_action,
             data.progress_scale,
+            data.perception_weight,
             data.safety_weight,
             data.ang_vel_penalty_scale,
             data.gate_width,
