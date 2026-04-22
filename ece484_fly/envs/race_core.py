@@ -1113,7 +1113,9 @@ class RaceCoreEnv:
         """Get the nominal or real gate positions and orientations depending on the sensor range."""
         mask, real_pos = gates_visited[..., None], mocap_pos[:, gate_mocap_ids]
         real_quat = mocap_quat[:, gate_mocap_ids][..., [1, 2, 3, 0]]
-        gates_pos = jnp.where(mask, real_pos[:, None], nominal_gate_pos[None, None])
+        if nominal_gate_pos.ndim == 2:
+            nominal_gate_pos = nominal_gate_pos[None]
+        gates_pos = jnp.where(mask, real_pos[:, None], nominal_gate_pos[:, None])
         gates_quat = jnp.where(mask, real_quat[:, None], nominal_gate_quat[None, None])
         mask, real_pos = obstacles_visited[..., None], mocap_pos[:, obstacle_mocap_ids]
         obstacles_pos = jnp.where(mask, real_pos[:, None], nominal_obstacle_pos[None, None])

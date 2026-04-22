@@ -41,9 +41,10 @@ vf_coef = 0.5
 
 [env.reset]
 bank_path = "artifacts/low-cen-gate/reset_bank.npz"
-bank_prob = 0.4
+bank_prob = 0.0
 gate_indices = [ 0, 1, 2, 3,]
-gate_probs = [ 0.45, 0.3, 0.17, 0.08,]
+# gate_probs = [ 0.45, 0.3, 0.17, 0.08,]
+gate_probs = [1.0, 0.0, 0.0, 0.0,]
 post_prev_distance_max = 0.95
 post_prev_distance_min = 0.35
 post_prev_prob = 0.7
@@ -68,6 +69,11 @@ vel_penalty_scale = 0.01
 
 [env.track]
 randomize = false
+
+[env.track.gate_z_randomization]
+min = -0.20
+max = 0.20
+
 [[env.track.drones]]
 pos = [ -1.5, 0.75, 0.01,]
 rpy = [ 0.0, 0.0, 0.0,]
