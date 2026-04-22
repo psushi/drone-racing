@@ -73,6 +73,10 @@ randomize = false
 min = -0.20
 max = 0.20
 
+[env.track.gate_yaw_randomization]
+min = -0.35
+max = 0.35
+
 [[env.track.drones]]
 pos = [ -1.5, 0.75, 0.01,]
 rpy = [ 0.0, 0.0, 0.0,]

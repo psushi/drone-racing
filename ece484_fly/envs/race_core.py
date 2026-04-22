@@ -1115,8 +1115,10 @@ class RaceCoreEnv:
         real_quat = mocap_quat[:, gate_mocap_ids][..., [1, 2, 3, 0]]
         if nominal_gate_pos.ndim == 2:
             nominal_gate_pos = nominal_gate_pos[None]
+        if nominal_gate_quat.ndim == 2:
+            nominal_gate_quat = nominal_gate_quat[None]
         gates_pos = jnp.where(mask, real_pos[:, None], nominal_gate_pos[:, None])
-        gates_quat = jnp.where(mask, real_quat[:, None], nominal_gate_quat[None, None])
+        gates_quat = jnp.where(mask, real_quat[:, None], nominal_gate_quat[:, None])
         mask, real_pos = obstacles_visited[..., None], mocap_pos[:, obstacle_mocap_ids]
         obstacles_pos = jnp.where(mask, real_pos[:, None], nominal_obstacle_pos[None, None])
         return gates_pos, gates_quat, obstacles_pos
