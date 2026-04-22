@@ -81,6 +81,7 @@ def _reward_terms(
 ) -> dict[str, float]:
     progress_scale = reward_cfg["progress_scale"]
     perception_weight = reward_cfg["perception_weight"]
+    perception_distance_scale = reward_cfg["perception_distance_scale"]
     safety_weight = reward_cfg["safety_weight"]
     ang_vel_penalty_scale = reward_cfg["ang_vel_penalty_scale"]
     gate_width = reward_cfg["gate_width"]
@@ -94,10 +95,17 @@ def _reward_terms(
     prev_gate_dist = float(np.linalg.norm(prev_gate_offset))
     curr_gate_dist = float(np.linalg.norm(curr_gate_offset))
     progress_reward = progress_scale * (prev_gate_dist - curr_gate_dist)
+    prev_gate_dir = prev_gate_offset / max(prev_gate_dist, 1e-6)
     safe_gate_dir = curr_gate_offset / max(curr_gate_dist, 1e-6)
     drone_forward = _quat_apply_np(quat, np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    prev_gate_view_alignment = float(np.dot(drone_forward, prev_gate_dir))
     gate_view_alignment = float(np.dot(drone_forward, safe_gate_dir))
-    perception_reward = perception_weight * gate_view_alignment
+    prev_perception_distance_gain = float(np.tanh(prev_gate_dist / max(perception_distance_scale, 1e-6)))
+    perception_distance_gain = float(np.tanh(curr_gate_dist / max(perception_distance_scale, 1e-6)))
+    perception_reward = perception_weight * (
+        perception_distance_gain * gate_view_alignment
+        - prev_perception_distance_gain * prev_gate_view_alignment
+    )
 
     gate_normal = _quat_apply_np(gate_quat, np.array([1.0, 0.0, 0.0], dtype=np.float32))
     rel_gate = pos - gate_pos
@@ -180,6 +188,7 @@ def debug_reward_attitude(
         "perception_weight": float(
             reward_cfg.get("perception_weight", reward_cfg.get("alignment_weight", 1.0))
         ),
+        "perception_distance_scale": float(reward_cfg.get("perception_distance_scale", 1.0)),
         "safety_weight": float(reward_cfg.get("safety_weight", 1.0)),
         "ang_vel_penalty_scale": float(reward_cfg.get("ang_vel_penalty_scale", 0.01)),
         "gate_width": float(reward_cfg.get("gate_width", 0.4)),
