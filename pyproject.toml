@@ -102,6 +102,7 @@ deploy = ".pixi/envs/deploy/bin/python scripts/deploy.py"
 debug = ".pixi/envs/default/bin/python scripts/debug_reward_attitude.py"
 watch = ".pixi/envs/default/bin/python scripts/watch_policy.py"
 train = ".pixi/envs/default/bin/python scripts/run_train_jax.py"
+harvest = ".pixi/envs/default/bin/python scripts/harvest_reset_bank.py"
 
 [tool.pixi.dependencies]
 openblas = ">=0.3.30,<0.4"

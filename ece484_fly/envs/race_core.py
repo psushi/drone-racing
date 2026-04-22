@@ -424,6 +424,33 @@ class RaceCoreEnv:
         self.reset_post_prev_distance_min = float(reset_cfg.get("post_prev_distance_min", 0.35))
         self.reset_post_prev_distance_max = float(reset_cfg.get("post_prev_distance_max", 0.95))
         self.reset_yaw_jitter = float(reset_cfg.get("yaw_jitter", 0.15))
+        self.reset_bank_prob = float(reset_cfg.get("bank_prob", 0.0))
+        if not 0.0 <= self.reset_bank_prob <= 1.0:
+            raise ValueError("reset_config.bank_prob must be in [0, 1]")
+        self.reset_bank_pos = None
+        self.reset_bank_quat = None
+        self.reset_bank_vel = None
+        self.reset_bank_ang_vel = None
+        self.reset_bank_target_gate = None
+        bank_path = reset_cfg.get("bank_path")
+        if bank_path:
+            bank = np.load(bank_path)
+            required = {"pos", "quat", "vel", "target_gate"}
+            missing = required - set(bank.files)
+            if missing:
+                raise ValueError(f"reset bank missing arrays: {sorted(missing)}")
+            self.reset_bank_pos = jnp.asarray(bank["pos"], dtype=jnp.float32)
+            self.reset_bank_quat = jnp.asarray(bank["quat"], dtype=jnp.float32)
+            self.reset_bank_vel = jnp.asarray(bank["vel"], dtype=jnp.float32)
+            self.reset_bank_ang_vel = jnp.asarray(
+                bank["ang_vel"] if "ang_vel" in bank.files else np.zeros_like(bank["vel"]),
+                dtype=jnp.float32,
+            )
+            self.reset_bank_target_gate = jnp.asarray(bank["target_gate"], dtype=jnp.int32)
+            if self.reset_bank_pos.shape[0] == 0:
+                raise ValueError("reset bank is empty")
+            if self.reset_bank_pos.shape[-1] != 3 or self.reset_bank_quat.shape[-1] != 4:
+                raise ValueError("reset bank has invalid shapes")
 
         # Load the track into the simulation and compile the reset and step functions with hooks
         self._setup_sim(randomizations)
@@ -487,7 +514,7 @@ class RaceCoreEnv:
         self.gates, self.obstacles, self.drone = load_track(track)
         # Randomize the track
         self.sim.data = self.sim.data.replace(core=self.sim.data.core.replace(rng_key=key))
-        reset_pos, reset_quat, reset_target_gate, reset_vel = self._sample_reset_state(subkey)
+        reset_pos, reset_quat, reset_target_gate, reset_vel, reset_ang_vel = self._sample_reset_state(subkey)
 
         @jax.jit
         def update_sim_data(
@@ -496,7 +523,7 @@ class RaceCoreEnv:
             pos = data.states.pos.at[...].set(reset_pos)
             quat = data.states.quat.at[...].set(reset_quat)
             vel = data.states.vel.at[...].set(reset_vel)
-            ang_vel = data.states.ang_vel.at[...].set(0.0)
+            ang_vel = data.states.ang_vel.at[...].set(reset_ang_vel)
             data = data.replace(states=data.states.replace(pos=pos, quat=quat, vel=vel, ang_vel=ang_vel))
 
             mjx_data = self.randomize_track(
@@ -522,7 +549,7 @@ class RaceCoreEnv:
 
         return self.obs(), self.info()
 
-    def _sample_reset_state(self, key: jax.random.PRNGKey) -> tuple[Array, Array, Array, Array]:
+    def _sample_reset_state(self, key: jax.random.PRNGKey) -> tuple[Array, Array, Array, Array, Array]:
         """Sample reset states before the target gate or just after the previous gate."""
         gate_pos = jnp.asarray(self.gates["pos"], dtype=jnp.float32)
         gate_quat = jnp.asarray(self.gates["quat"], dtype=jnp.float32)
@@ -536,7 +563,7 @@ class RaceCoreEnv:
         )
         hover_center = gate_pos - 1.25 * gate_forward
 
-        keys = jax.random.split(key, 8)
+        keys = jax.random.split(key, 10)
         reset_gate_indices = jnp.asarray(self.reset_gate_indices, dtype=jnp.int32)
         reset_gate_probs = jnp.asarray(self.reset_gate_probs, dtype=jnp.float32)
         gate_choice = jax.random.categorical(
@@ -591,6 +618,7 @@ class RaceCoreEnv:
         pre_speed = jnp.asarray(self.reset_pre_gate_speed, dtype=jnp.float32)
         reset_speed = jnp.where(use_post_prev, post_speed, pre_speed)
         reset_vel = reset_speed[:, None, None] * gate_forward
+        reset_ang_vel = jnp.zeros_like(reset_vel)
 
         yaw_jitter = jax.random.uniform(
             keys[7],
@@ -613,7 +641,29 @@ class RaceCoreEnv:
             self._quat_multiply(yaw_quat, gate_quat),
             gate_quat,
         )
-        return hover_pos, reset_quat, reset_target_gate, reset_vel
+        if self.reset_bank_pos is not None and self.reset_bank_prob > 0.0:
+            bank_idx = jax.random.randint(
+                keys[8],
+                (self.sim.n_worlds,),
+                minval=0,
+                maxval=self.reset_bank_pos.shape[0],
+            )
+            use_bank = jax.random.bernoulli(
+                keys[9],
+                p=self.reset_bank_prob,
+                shape=(self.sim.n_worlds,),
+            )
+            bank_pos = self.reset_bank_pos[bank_idx][:, None, :]
+            bank_quat = self.reset_bank_quat[bank_idx][:, None, :]
+            bank_vel = self.reset_bank_vel[bank_idx][:, None, :]
+            bank_ang_vel = self.reset_bank_ang_vel[bank_idx][:, None, :]
+            bank_target_gate = self.reset_bank_target_gate[bank_idx]
+            hover_pos = jnp.where(use_bank[:, None, None], bank_pos, hover_pos)
+            reset_quat = jnp.where(use_bank[:, None, None], bank_quat, reset_quat)
+            reset_vel = jnp.where(use_bank[:, None, None], bank_vel, reset_vel)
+            reset_ang_vel = jnp.where(use_bank[:, None, None], bank_ang_vel, reset_ang_vel)
+            reset_target_gate = jnp.where(use_bank, bank_target_gate, reset_target_gate)
+        return hover_pos, reset_quat, reset_target_gate, reset_vel, reset_ang_vel
 
     def _step(self, action: Array) -> tuple[dict[str, Array], float, bool, bool, dict]:
         """Step the firmware_wrapper class and its environment.
