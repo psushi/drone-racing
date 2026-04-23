@@ -202,6 +202,42 @@ class DisableReasonFlags:
     invalid_state: Array
 
 
+@dataclass
+class ResetSamplerConfig:
+    reset_gate_indices: Array
+    reset_gate_probs: Array
+    post_prev_prob: float
+    post_prev_speed_min: float
+    post_prev_speed_max: float
+    pre_gate_speed: float
+    post_prev_distance_min: float
+    post_prev_distance_max: float
+    yaw_jitter: float
+    along_track_min: float = -0.10
+    along_track_max: float = 0.10
+    lateral_min: float = -0.05
+    lateral_max: float = 0.05
+    vertical_min: float = -0.02
+    vertical_max: float = 0.02
+    pre_gate_distance: float = 1.25
+    world_up: Array | None = None
+    bank_prob: float = 0.0
+    bank_pos: Array | None = None
+    bank_quat: Array | None = None
+    bank_vel: Array | None = None
+    bank_ang_vel: Array | None = None
+    bank_target_gate: Array | None = None
+
+
+@dataclass
+class ResetSample:
+    pos: Array
+    quat: Array
+    target_gate: Array
+    vel: Array
+    ang_vel: Array
+
+
 def build_action_space(control_mode: Literal["state", "attitude"], drone_model: str) -> spaces.Box:
     """Create the action space for the environment.
 
@@ -554,34 +590,37 @@ class RaceCoreEnv:
 
         return self.obs(), self.info()
 
-    def _sample_reset_state(self, key: jax.random.PRNGKey) -> tuple[Array, Array, Array, Array, Array]:
-        """Sample reset states before the target gate or just after the previous gate."""
-        gate_pos = jnp.asarray(self.gates["pos"], dtype=jnp.float32)
-        gate_quat = jnp.asarray(self.gates["quat"], dtype=jnp.float32)
-        gate_forward = jax.vmap(self._quat_apply, in_axes=(0, 0))(
-            gate_quat,
-            jnp.broadcast_to(jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32), gate_pos.shape),
-        )
-        gate_lateral = jax.vmap(self._quat_apply, in_axes=(0, 0))(
-            gate_quat,
-            jnp.broadcast_to(jnp.array([0.0, 1.0, 0.0], dtype=jnp.float32), gate_pos.shape),
-        )
-        hover_center = gate_pos - 1.25 * gate_forward
-
+    @staticmethod
+    def _sample_reset_state_from_config(
+        key: jax.random.PRNGKey,
+        gate_pos: Array,
+        gate_quat: Array,
+        n_worlds: int,
+        config: ResetSamplerConfig,
+    ) -> ResetSample:
+        """Sample reset state from gate poses and a structured reset config."""
         keys = jax.random.split(key, 10)
-        reset_gate_indices = jnp.asarray(self.reset_gate_indices, dtype=jnp.int32)
-        reset_gate_probs = jnp.asarray(self.reset_gate_probs, dtype=jnp.float32)
+        gate_forward = jax.vmap(RaceCoreEnv._quat_apply, in_axes=(0, 0))(
+            gate_quat,
+            jnp.broadcast_to(jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32), gate_quat.shape),
+        )
+        gate_lateral = jax.vmap(RaceCoreEnv._quat_apply, in_axes=(0, 0))(
+            gate_quat,
+            jnp.broadcast_to(jnp.array([0.0, 1.0, 0.0], dtype=jnp.float32), gate_quat.shape),
+        )
+        hover_center = gate_pos - config.pre_gate_distance * gate_forward
+
         gate_choice = jax.random.categorical(
             keys[3],
-            jnp.log(reset_gate_probs),
-            shape=(self.sim.n_worlds,),
+            jnp.log(config.reset_gate_probs),
+            shape=(n_worlds,),
         )
-        reset_target_gate = reset_gate_indices[gate_choice]
+        reset_target_gate = config.reset_gate_indices[gate_choice]
         prev_gate = jnp.maximum(reset_target_gate - 1, 0)
         use_post_prev = jax.random.bernoulli(
             keys[4],
-            p=self.reset_post_prev_prob,
-            shape=(self.sim.n_worlds,),
+            p=config.post_prev_prob,
+            shape=(n_worlds,),
         ) & (reset_target_gate > 0)
 
         pre_center = hover_center[reset_target_gate]
@@ -591,45 +630,51 @@ class RaceCoreEnv:
 
         post_distance = jax.random.uniform(
             keys[5],
-            (self.sim.n_worlds, 1),
-            minval=self.reset_post_prev_distance_min,
-            maxval=self.reset_post_prev_distance_max,
+            (n_worlds, 1),
+            minval=config.post_prev_distance_min,
+            maxval=config.post_prev_distance_max,
         )
         post_center = gate_pos[prev_gate] + post_distance * gate_forward[prev_gate]
         post_forward = gate_forward[prev_gate]
         post_lateral = gate_lateral[prev_gate]
         post_quat = gate_quat[prev_gate]
 
-        hover_center = jnp.where(use_post_prev[:, None], post_center, pre_center)[:, None, :]
-        gate_forward = jnp.where(use_post_prev[:, None], post_forward, pre_forward)[:, None, :]
-        gate_lateral = jnp.where(use_post_prev[:, None], post_lateral, pre_lateral)[:, None, :]
-        gate_quat = jnp.where(use_post_prev[:, None], post_quat, pre_quat)[:, None, :]
+        reset_center = jnp.where(use_post_prev[:, None], post_center, pre_center)[:, None, :]
+        reset_forward = jnp.where(use_post_prev[:, None], post_forward, pre_forward)[:, None, :]
+        reset_lateral = jnp.where(use_post_prev[:, None], post_lateral, pre_lateral)[:, None, :]
+        reset_quat = jnp.where(use_post_prev[:, None], post_quat, pre_quat)[:, None, :]
 
-        along_track = jax.random.uniform(keys[0], (self.sim.n_worlds, 1, 1), minval=-0.10, maxval=0.10)
-        lateral = jax.random.uniform(keys[1], (self.sim.n_worlds, 1, 1), minval=-0.05, maxval=0.05)
-        vertical = jax.random.uniform(keys[2], (self.sim.n_worlds, 1, 1), minval=-0.02, maxval=0.02)
-        hover_pos = (
-            hover_center
-            - along_track * gate_forward
-            + lateral * gate_lateral
-            + vertical * np.array([0.0, 0.0, 1.0], dtype=np.float32).reshape((1, 1, 3))
+        world_up = config.world_up
+        if world_up is None:
+            world_up = jnp.asarray(np.array([0.0, 0.0, 1.0], dtype=np.float32).reshape((1, 1, 3)))
+
+        along_track = jax.random.uniform(
+            keys[0], (n_worlds, 1, 1), minval=config.along_track_min, maxval=config.along_track_max
         )
+        lateral = jax.random.uniform(
+            keys[1], (n_worlds, 1, 1), minval=config.lateral_min, maxval=config.lateral_max
+        )
+        vertical = jax.random.uniform(
+            keys[2], (n_worlds, 1, 1), minval=config.vertical_min, maxval=config.vertical_max
+        )
+        reset_pos = reset_center - along_track * reset_forward + lateral * reset_lateral + vertical * world_up
+
         post_speed = jax.random.uniform(
             keys[6],
-            (self.sim.n_worlds,),
-            minval=self.reset_post_prev_speed_min,
-            maxval=self.reset_post_prev_speed_max,
+            (n_worlds,),
+            minval=config.post_prev_speed_min,
+            maxval=config.post_prev_speed_max,
         )
-        pre_speed = jnp.asarray(self.reset_pre_gate_speed, dtype=jnp.float32)
+        pre_speed = jnp.asarray(config.pre_gate_speed, dtype=jnp.float32)
         reset_speed = jnp.where(use_post_prev, post_speed, pre_speed)
-        reset_vel = reset_speed[:, None, None] * gate_forward
+        reset_vel = reset_speed[:, None, None] * reset_forward
         reset_ang_vel = jnp.zeros_like(reset_vel)
 
         yaw_jitter = jax.random.uniform(
             keys[7],
-            (self.sim.n_worlds, 1, 1),
-            minval=-self.reset_yaw_jitter,
-            maxval=self.reset_yaw_jitter,
+            (n_worlds, 1, 1),
+            minval=-config.yaw_jitter,
+            maxval=config.yaw_jitter,
         )
         half_yaw = 0.5 * yaw_jitter
         yaw_quat = jnp.concatenate(
@@ -643,32 +688,68 @@ class RaceCoreEnv:
         )
         reset_quat = jnp.where(
             use_post_prev[:, None, None],
-            self._quat_multiply(yaw_quat, gate_quat),
-            gate_quat,
+            RaceCoreEnv._quat_multiply(yaw_quat, reset_quat),
+            reset_quat,
         )
-        if self.reset_bank_pos is not None and self.reset_bank_prob > 0.0:
+
+        if config.bank_pos is not None and config.bank_prob > 0.0:
             bank_idx = jax.random.randint(
                 keys[8],
-                (self.sim.n_worlds,),
+                (n_worlds,),
                 minval=0,
-                maxval=self.reset_bank_pos.shape[0],
+                maxval=config.bank_pos.shape[0],
             )
             use_bank = jax.random.bernoulli(
                 keys[9],
-                p=self.reset_bank_prob,
-                shape=(self.sim.n_worlds,),
+                p=config.bank_prob,
+                shape=(n_worlds,),
             )
-            bank_pos = self.reset_bank_pos[bank_idx][:, None, :]
-            bank_quat = self.reset_bank_quat[bank_idx][:, None, :]
-            bank_vel = self.reset_bank_vel[bank_idx][:, None, :]
-            bank_ang_vel = self.reset_bank_ang_vel[bank_idx][:, None, :]
-            bank_target_gate = self.reset_bank_target_gate[bank_idx]
-            hover_pos = jnp.where(use_bank[:, None, None], bank_pos, hover_pos)
+            bank_pos = config.bank_pos[bank_idx][:, None, :]
+            bank_quat = config.bank_quat[bank_idx][:, None, :]
+            bank_vel = config.bank_vel[bank_idx][:, None, :]
+            bank_ang_vel = config.bank_ang_vel[bank_idx][:, None, :]
+            bank_target_gate = config.bank_target_gate[bank_idx]
+            reset_pos = jnp.where(use_bank[:, None, None], bank_pos, reset_pos)
             reset_quat = jnp.where(use_bank[:, None, None], bank_quat, reset_quat)
             reset_vel = jnp.where(use_bank[:, None, None], bank_vel, reset_vel)
             reset_ang_vel = jnp.where(use_bank[:, None, None], bank_ang_vel, reset_ang_vel)
             reset_target_gate = jnp.where(use_bank, bank_target_gate, reset_target_gate)
-        return hover_pos, reset_quat, reset_target_gate, reset_vel, reset_ang_vel
+
+        return ResetSample(
+            pos=reset_pos,
+            quat=reset_quat,
+            target_gate=reset_target_gate,
+            vel=reset_vel,
+            ang_vel=reset_ang_vel,
+        )
+
+    def _sample_reset_state(self, key: jax.random.PRNGKey) -> tuple[Array, Array, Array, Array, Array]:
+        """Sample reset states before the target gate or just after the previous gate."""
+        sample = self._sample_reset_state_from_config(
+            key=key,
+            gate_pos=jnp.asarray(self.gates["pos"], dtype=jnp.float32),
+            gate_quat=jnp.asarray(self.gates["quat"], dtype=jnp.float32),
+            n_worlds=self.sim.n_worlds,
+            config=ResetSamplerConfig(
+                reset_gate_indices=jnp.asarray(self.reset_gate_indices, dtype=jnp.int32),
+                reset_gate_probs=jnp.asarray(self.reset_gate_probs, dtype=jnp.float32),
+                post_prev_prob=self.reset_post_prev_prob,
+                post_prev_speed_min=self.reset_post_prev_speed_min,
+                post_prev_speed_max=self.reset_post_prev_speed_max,
+                pre_gate_speed=self.reset_pre_gate_speed,
+                post_prev_distance_min=self.reset_post_prev_distance_min,
+                post_prev_distance_max=self.reset_post_prev_distance_max,
+                yaw_jitter=self.reset_yaw_jitter,
+                world_up=jnp.asarray(np.array([0.0, 0.0, 1.0], dtype=np.float32).reshape((1, 1, 3))),
+                bank_prob=self.reset_bank_prob,
+                bank_pos=self.reset_bank_pos,
+                bank_quat=self.reset_bank_quat,
+                bank_vel=self.reset_bank_vel,
+                bank_ang_vel=self.reset_bank_ang_vel,
+                bank_target_gate=self.reset_bank_target_gate,
+            ),
+        )
+        return sample.pos, sample.quat, sample.target_gate, sample.vel, sample.ang_vel
 
     def _step(self, action: Array) -> tuple[dict[str, Array], float, bool, bool, dict]:
         """Step the firmware_wrapper class and its environment.

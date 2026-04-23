@@ -1,7 +1,7 @@
 # Randomized Intertial Properties
 
 [controller]
-file = "waypoint_controller.py" # Default demo controller. You can override via CLI or set your own file here.
+file = "controller_file_name_here.py" # Put your controller file name here. Specifying a controller as argument to scripts will override this setting. Controllers are located in `ece484_fly/control/`
 
 [deploy]
 ### Settings only relevant for deployment
@@ -17,23 +17,6 @@ id = 1
 channel = 100
 drone_model = "cf21B_500"                        # Model of the drone, i.e., cf2x_L250, cf2x_P250, cf2x_T500, cf21B_500. For this course, we use cf21B_500
 
-[train]
-# Training loop:
-# For num_iterations:
-    # we collect num_steps of data for num_envs environments in parallel
-    # For this batch of data, we split into num_minibatches and we update the agent's policy using gradient descent num_epoch times for each minibatch
-num_steps = 64
-num_minibatches = 8
-num_envs = 64
-num_iterations = 700
-gamma = 0.99
-lambda_ = 0.95
-max_grad_norm = 0.5
-lr = 0.0003
-clip_eps = 0.2
-vf_coef = 0.5
-ent_coef = 0.02
-num_epochs = 4
 
 [sim]
 # Physics options:
@@ -46,25 +29,56 @@ drone_model = "cf21B_500"                        # Model of the drone, i.e., cf2
 camera_view = [5.0, 180.0, -25.0, 0.0, 0.0, 0.0] # Camera view [distance, azimuth, elevation, lookat_x, lookat_y, lookat_z]
 freq = 500                                        # Simulation frequency, in Hz
 attitude_freq = 500                               # Controller frequency, in Hz. This frequency is used to simulate the onboard controller, NOT for the environment's step function
-render = true                                       # Enable/disable PyBullet's GUI
-pause = true
+render = false                                       # Enable/disable PyBullet's GUI
 
 
 [env]
 id = "DroneRacing-v0"   # "DroneRacing-v0" for single races. Each environment implements a vector-environment for faster training
 seed = "random"         # Either "random" for a random behavior or an integer for reproducibility
 freq = 100               # Frequency of the environment's step function, in Hz
+max_episode_steps = 800
 sensor_range = 0.7      # Range at which the exact location of gates and obstacles become visible to the drone. Objects that are not in the drone's sensor range report their nominal position.
 control_mode = "attitude"  # Control mode of the environment. Can be either "state" or "attitude"
 
+[train]
+clip_eps = 0.2
+ent_coef = 0.005
+gamma = 0.99
+lambda_ = 0.95
+lr = 0.0003
+max_grad_norm = 0.5
+num_envs = 128
+num_epochs = 4
+num_iterations = 2800
+num_minibatches = 8
+num_steps = 192
+vf_coef = 0.5
+
+[env.reset]
+bank_path = "artifacts/low-cen-gate/reset_bank.npz"
+bank_prob = 0.0
+gate_indices = [0, 1, 2, 3]
+gate_probs = [0.22, 0.3, 0.33, 0.15]
+post_prev_distance_max = 0.95
+post_prev_distance_min = 0.35
+post_prev_prob = 0.7
+post_prev_speed_max = 3.0
+post_prev_speed_min = 1.5
+pre_gate_speed = 0.0
+yaw_jitter = 0.15
+
 [env.reward]
-progress_scale = 10.0
-safety_weight = 1.0
-ang_vel_penalty_scale = 0.01
-gate_width = 0.4
-safety_activation_distance = 2.5
+ang_vel_penalty_scale = 0.004
 crash_penalty = 5.0
 gate_pass_bonus = 5.0
+gate_width = 0.4
+max_angular_speed = 25.0
+max_linear_speed = 12.0
+perception_distance_scale = 1.0
+perception_weight = 0.35
+progress_scale = 30.0
+safety_activation_distance = 2.5
+safety_weight = 1.5
 vel_penalty_scale = 0.01
 
 [env.track]
@@ -104,15 +118,26 @@ ang_vel = [0, 0, 0]
 pos_limit_low = [-2.5, -1.5, -1e-3]
 pos_limit_high = [2.5, 1.5, 2.0]
 
+[env.track.gate_z_randomization]
+min = 0.0
+max = 0.0
+
+[env.track.gate_yaw_randomization]
+min = 0.0
+max = 0.0
+
+[env.track.gate_xy_randomization]
+radius = 0.0
+
 [env.disturbances.action]
 fn = "normal"
-scale = 0.0
+scale = 0.001
 
 [env.disturbances.dynamics]
 fn = "uniform"
 [env.disturbances.dynamics.kwargs]
-minval = [0.0, 0.0, 0.0]
-maxval = [0.0, 0.0, 0.0]
+minval = [-0.1, -0.1, -0.1]
+maxval = [0.1, 0.1, 0.1]
 
 [env.randomizations.drone_pos]
 fn = "uniform"
