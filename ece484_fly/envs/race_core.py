@@ -629,10 +629,17 @@ class RaceCoreEnv:
             shape=(n_worlds,),
         ) & (reset_target_gate > 0)
 
-        pre_center = hover_center[reset_target_gate]
-        pre_forward = gate_forward[reset_target_gate]
-        pre_lateral = gate_lateral[reset_target_gate]
-        pre_quat = gate_quat[reset_target_gate]
+        if gate_pos.ndim == 3:
+            env_idx = jnp.arange(n_worlds)
+            pre_center = hover_center[env_idx, reset_target_gate]
+            pre_forward = gate_forward[env_idx, reset_target_gate]
+            pre_lateral = gate_lateral[env_idx, reset_target_gate]
+            pre_quat = gate_quat[env_idx, reset_target_gate]
+        else:
+            pre_center = hover_center[reset_target_gate]
+            pre_forward = gate_forward[reset_target_gate]
+            pre_lateral = gate_lateral[reset_target_gate]
+            pre_quat = gate_quat[reset_target_gate]
 
         post_distance = jax.random.uniform(
             keys[5],
@@ -640,10 +647,16 @@ class RaceCoreEnv:
             minval=config.post_prev_distance_min,
             maxval=config.post_prev_distance_max,
         )
-        post_center = gate_pos[prev_gate] + post_distance * gate_forward[prev_gate]
-        post_forward = gate_forward[prev_gate]
-        post_lateral = gate_lateral[prev_gate]
-        post_quat = gate_quat[prev_gate]
+        if gate_pos.ndim == 3:
+            post_center = gate_pos[env_idx, prev_gate] + post_distance * gate_forward[env_idx, prev_gate]
+            post_forward = gate_forward[env_idx, prev_gate]
+            post_lateral = gate_lateral[env_idx, prev_gate]
+            post_quat = gate_quat[env_idx, prev_gate]
+        else:
+            post_center = gate_pos[prev_gate] + post_distance * gate_forward[prev_gate]
+            post_forward = gate_forward[prev_gate]
+            post_lateral = gate_lateral[prev_gate]
+            post_quat = gate_quat[prev_gate]
 
         reset_center = jnp.where(use_post_prev[:, None], post_center, pre_center)[:, None, :]
         reset_forward = jnp.where(use_post_prev[:, None], post_forward, pre_forward)[:, None, :]
