@@ -21,7 +21,7 @@ from ml_collections import ConfigDict
 from scipy.spatial.transform import Rotation as R
 
 from ece484_fly.envs.drone_race import DroneRaceEnv, VecDroneRaceEnv
-from ece484_fly.envs.race_core import EnvData, RaceCoreEnv, ResetSamplerConfig
+from ece484_fly.envs.race_core import EnvData, RaceCoreEnv
 from ece484_fly.envs.utils import gate_passed
 from ece484_fly.utils import load_config
 
@@ -185,31 +185,110 @@ class FunctionalJaxVecDroneRaceEnv:
     def _sample_reset_state(
         self, key: jax.Array, gate_pos: jax.Array, gate_quat: jax.Array
     ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
-        sample = RaceCoreEnv._sample_reset_state_from_config(
-            key=key,
-            gate_pos=gate_pos,
-            gate_quat=gate_quat,
-            n_worlds=self.num_envs,
-            config=ResetSamplerConfig(
-                reset_gate_indices=self._reset_gate_indices,
-                reset_gate_probs=self._reset_gate_probs,
-                post_prev_prob=self._reset_post_prev_prob,
-                post_prev_speed_min=self._reset_post_prev_speed_min,
-                post_prev_speed_max=self._reset_post_prev_speed_max,
-                pre_gate_speed=self._reset_pre_gate_speed,
-                post_prev_distance_min=self._reset_post_prev_distance_min,
-                post_prev_distance_max=self._reset_post_prev_distance_max,
-                yaw_jitter=self._reset_yaw_jitter,
-                world_up=self._world_up,
-                bank_prob=self._reset_bank_prob,
-                bank_pos=self._reset_bank_pos,
-                bank_quat=self._reset_bank_quat,
-                bank_vel=self._reset_bank_vel,
-                bank_ang_vel=self._reset_bank_ang_vel,
-                bank_target_gate=self._reset_bank_target_gate,
-            ),
+        keys = jax.random.split(key, 10)
+        gate_forward = jax.vmap(RaceCoreEnv._quat_apply, in_axes=(0, 0))(
+            gate_quat,
+            jnp.broadcast_to(jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32), gate_quat.shape[:-1] + (3,)),
         )
-        return sample.pos, sample.quat, sample.target_gate, sample.vel, sample.ang_vel
+        gate_lateral = jax.vmap(RaceCoreEnv._quat_apply, in_axes=(0, 0))(
+            gate_quat,
+            jnp.broadcast_to(jnp.array([0.0, 1.0, 0.0], dtype=jnp.float32), gate_quat.shape[:-1] + (3,)),
+        )
+        hover_center = gate_pos - 1.25 * gate_forward
+        logits = jnp.log(self._reset_gate_probs)
+        gate_choice = jax.random.categorical(keys[3], logits, shape=(self.num_envs,))
+        reset_target_gate = self._reset_gate_indices[gate_choice]
+        prev_gate = jnp.maximum(reset_target_gate - 1, 0)
+        use_post_prev = jax.random.bernoulli(
+            keys[4],
+            p=self._reset_post_prev_prob,
+            shape=(self.num_envs,),
+        ) & (reset_target_gate > 0)
+
+        env_idx = jnp.arange(self.num_envs)
+        pre_center = hover_center[env_idx, reset_target_gate]
+        pre_forward = gate_forward[env_idx, reset_target_gate]
+        pre_lateral = gate_lateral[env_idx, reset_target_gate]
+        pre_quat = gate_quat[env_idx, reset_target_gate]
+
+        post_distance = jax.random.uniform(
+            keys[5],
+            (self.num_envs, 1),
+            minval=self._reset_post_prev_distance_min,
+            maxval=self._reset_post_prev_distance_max,
+        )
+        post_center = gate_pos[env_idx, prev_gate] + post_distance * gate_forward[env_idx, prev_gate]
+        post_forward = gate_forward[env_idx, prev_gate]
+        post_lateral = gate_lateral[env_idx, prev_gate]
+        post_quat = gate_quat[env_idx, prev_gate]
+
+        reset_center = jnp.where(use_post_prev[:, None], post_center, pre_center)[:, None, :]
+        reset_forward = jnp.where(use_post_prev[:, None], post_forward, pre_forward)[:, None, :]
+        reset_lateral = jnp.where(use_post_prev[:, None], post_lateral, pre_lateral)[:, None, :]
+        reset_quat = jnp.where(use_post_prev[:, None], post_quat, pre_quat)[:, None, :]
+        along_track = jax.random.uniform(keys[0], (self.num_envs, 1, 1), minval=-0.10, maxval=0.10)
+        lateral = jax.random.uniform(keys[1], (self.num_envs, 1, 1), minval=-0.05, maxval=0.05)
+        vertical = jax.random.uniform(keys[2], (self.num_envs, 1, 1), minval=-0.02, maxval=0.02)
+        reset_pos = (
+            reset_center
+            - along_track * reset_forward
+            + lateral * reset_lateral
+            + vertical * self._world_up
+        )
+        post_speed = jax.random.uniform(
+            keys[6],
+            (self.num_envs,),
+            minval=self._reset_post_prev_speed_min,
+            maxval=self._reset_post_prev_speed_max,
+        )
+        pre_speed = jnp.asarray(self._reset_pre_gate_speed, dtype=jnp.float32)
+        reset_speed = jnp.where(use_post_prev, post_speed, pre_speed)
+        reset_vel = reset_speed[:, None, None] * reset_forward
+        reset_ang_vel = jnp.zeros_like(reset_vel)
+        yaw_jitter = jax.random.uniform(
+            keys[7],
+            (self.num_envs, 1, 1),
+            minval=-self._reset_yaw_jitter,
+            maxval=self._reset_yaw_jitter,
+        )
+        half_yaw = 0.5 * yaw_jitter
+        yaw_quat = jnp.concatenate(
+            [
+                jnp.zeros_like(half_yaw),
+                jnp.zeros_like(half_yaw),
+                jnp.sin(half_yaw),
+                jnp.cos(half_yaw),
+            ],
+            axis=-1,
+        )
+        reset_quat = jnp.where(
+            use_post_prev[:, None, None],
+            RaceCoreEnv._quat_multiply(yaw_quat, reset_quat),
+            reset_quat,
+        )
+        if self._reset_bank_pos is not None and self._reset_bank_prob > 0.0:
+            bank_idx = jax.random.randint(
+                keys[8],
+                (self.num_envs,),
+                minval=0,
+                maxval=self._reset_bank_pos.shape[0],
+            )
+            use_bank = jax.random.bernoulli(
+                keys[9],
+                p=self._reset_bank_prob,
+                shape=(self.num_envs,),
+            )
+            bank_pos = self._reset_bank_pos[bank_idx][:, None, :]
+            bank_quat = self._reset_bank_quat[bank_idx][:, None, :]
+            bank_vel = self._reset_bank_vel[bank_idx][:, None, :]
+            bank_ang_vel = self._reset_bank_ang_vel[bank_idx][:, None, :]
+            bank_target_gate = self._reset_bank_target_gate[bank_idx]
+            reset_pos = jnp.where(use_bank[:, None, None], bank_pos, reset_pos)
+            reset_quat = jnp.where(use_bank[:, None, None], bank_quat, reset_quat)
+            reset_vel = jnp.where(use_bank[:, None, None], bank_vel, reset_vel)
+            reset_ang_vel = jnp.where(use_bank[:, None, None], bank_ang_vel, reset_ang_vel)
+            reset_target_gate = jnp.where(use_bank, bank_target_gate, reset_target_gate)
+        return reset_pos, reset_quat, reset_target_gate, reset_vel, reset_ang_vel
 
     def _sample_gate_nominal_track(self, key: jax.Array) -> tuple[jax.Array, jax.Array]:
         if self._mirror_prob > 0.0:
