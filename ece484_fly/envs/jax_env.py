@@ -212,7 +212,11 @@ class FunctionalJaxVecDroneRaceEnv:
         return sample.pos, sample.quat, sample.target_gate, sample.vel, sample.ang_vel
 
     def _sample_gate_nominal_track(self, key: jax.Array) -> tuple[jax.Array, jax.Array]:
-        key_z, key_yaw, key_xy, key_mirror = jax.random.split(key, 4)
+        if self._mirror_prob > 0.0:
+            key_z, key_yaw, key_xy, key_mirror = jax.random.split(key, 4)
+        else:
+            key_z, key_yaw, key_xy = jax.random.split(key, 3)
+            key_mirror = None
         gate_nominal_pos = jnp.broadcast_to(
             self._gate_nominal_pos[None, ...],
             (self.num_envs, *self._gate_nominal_pos.shape),

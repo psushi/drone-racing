@@ -299,8 +299,8 @@ def make_train_iteration_fn(
 
 def run_train(
     config: str = "level1_flat.toml",
-    num_envs: int = 100,
-    seed: int = 0,
+    num_envs: int | None = None,
+    seed: int | None = None,
     checkpoint_path: str = "artifacts/policy_jax/model.msgpack",
     init_checkpoint_path: str = "",
     device: str = "auto",
@@ -318,6 +318,14 @@ def run_train(
         prefer_checkpoint_sidecar=False,
     )
     cfg = load_config(resolved_config_path)
+    cfg_seed = cfg.env.get("seed", 0)
+    if seed is None:
+        if cfg_seed == "random":
+            raise ValueError(
+                "Training reproducibility requires a fixed seed. Set env.seed to an integer in the config "
+                "or pass --seed explicitly."
+            )
+        seed = int(cfg_seed)
     wandb_cfg = cfg.get("wandb", {})
     wandb_project = wandb_project or str(wandb_cfg.get("project", ""))
     wandb_mode = wandb_mode or str(wandb_cfg.get("mode", "online"))
@@ -335,7 +343,7 @@ def run_train(
 
     env = FunctionalJaxVecDroneRaceEnv(
         config=str(resolved_config_path),
-        num_envs=num_envs if cfg.train.num_envs is None else cfg.train.num_envs,
+        num_envs=cfg.train.num_envs if num_envs is None else num_envs,
         seed=seed,
         device=device,
     )
