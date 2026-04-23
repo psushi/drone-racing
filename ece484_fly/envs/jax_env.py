@@ -141,6 +141,8 @@ class FunctionalJaxVecDroneRaceEnv:
         gate_yaw_randomization = cfg.env.track.get("gate_yaw_randomization", ConfigDict())
         self._gate_yaw_min = float(gate_yaw_randomization.get("min", 0.0))
         self._gate_yaw_max = float(gate_yaw_randomization.get("max", 0.0))
+        gate_xy_randomization = cfg.env.track.get("gate_xy_randomization", ConfigDict())
+        self._gate_xy_radius = float(gate_xy_randomization.get("radius", 0.0))
         self._reset_gate_indices = jnp.asarray(self.env.reset_gate_indices, dtype=jnp.int32)
         self._reset_gate_probs = jnp.asarray(self.env.reset_gate_probs, dtype=jnp.float32)
         self._reset_post_prev_prob = float(self.env.reset_post_prev_prob)
@@ -287,7 +289,7 @@ class FunctionalJaxVecDroneRaceEnv:
         return reset_pos, reset_quat, reset_target_gate, reset_vel, reset_ang_vel
 
     def _sample_gate_nominal_track(self, key: jax.Array) -> tuple[jax.Array, jax.Array]:
-        key_z, key_yaw = jax.random.split(key)
+        key_z, key_yaw, key_xy = jax.random.split(key, 3)
         gate_nominal_pos = jnp.broadcast_to(
             self._gate_nominal_pos[None, ...],
             (self.num_envs, *self._gate_nominal_pos.shape),
@@ -305,6 +307,15 @@ class FunctionalJaxVecDroneRaceEnv:
                 maxval=self._gate_z_max,
             )
             gate_nominal_pos = gate_nominal_pos.at[:, :, 2].add(z_offset)
+
+        if self._gate_xy_radius > 0.0:
+            xy_offset = jax.random.uniform(
+                key_xy,
+                (self.num_envs, self._gate_nominal_pos.shape[0], 2),
+                minval=-self._gate_xy_radius,
+                maxval=self._gate_xy_radius,
+            )
+            gate_nominal_pos = gate_nominal_pos.at[:, :, :2].add(xy_offset)
 
         if not (self._gate_yaw_min == 0.0 and self._gate_yaw_max == 0.0):
             yaw_offset = jax.random.uniform(

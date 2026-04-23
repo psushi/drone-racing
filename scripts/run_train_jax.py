@@ -295,12 +295,14 @@ def run_train(
     num_envs: int = 100,
     seed: int = 0,
     checkpoint_path: str = "artifacts/policy_jax/model.msgpack",
+    init_checkpoint_path: str = "",
     device: str = "auto",
     wandb_project: str = "",
     wandb_run_name: str = "",
     wandb_mode: str = "online",
 ) -> None:
     checkpoint_path = str(normalize_checkpoint_path(checkpoint_path))
+    init_checkpoint_path = str(normalize_checkpoint_path(init_checkpoint_path)) if init_checkpoint_path else ""
     repo_root = Path(__file__).parents[1]
     resolved_config_path = choose_runtime_config_path(
         repo_root,
@@ -359,6 +361,14 @@ def run_train(
         lr=cfg.train.lr,
         max_grad_norm=cfg.train.max_grad_norm,
     )
+    if init_checkpoint_path:
+        train_state = train_state.replace(
+            params=serialization.from_bytes(
+                train_state.params,
+                Path(init_checkpoint_path).read_bytes(),
+            )
+        )
+        print(f"Initialized policy from {init_checkpoint_path}")
     env_state, obs_dict = env.reset(seed=seed)
     last_obs = flatten_obs_jax(obs_dict, vectorized=True)
     runner_state = RunnerState(train_state, env_state, last_obs, rng)
@@ -377,6 +387,7 @@ def run_train(
                     "seed": seed,
                     "device": device,
                     "checkpoint_path": checkpoint_path,
+                    "init_checkpoint_path": init_checkpoint_path,
                     "train": dict(cfg.train),
                     "env_reward": dict(cfg.env.get("reward") or {}),
                     "num_envs_effective": env.num_envs,
@@ -527,6 +538,7 @@ def run_train(
                     transitions_per_iter=transitions_per_iter,
                 ),
                 "completed_iterations": int(cfg.train.num_iterations),
+                "init_checkpoint_path": init_checkpoint_path,
                 "final_running_mean_reward": total_reward_sum / total_reward_count,
                 "final_metrics": final_metrics,
                 "best_metrics": best_metrics,
