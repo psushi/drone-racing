@@ -602,11 +602,17 @@ class RaceCoreEnv:
         keys = jax.random.split(key, 10)
         gate_forward = jax.vmap(RaceCoreEnv._quat_apply, in_axes=(0, 0))(
             gate_quat,
-            jnp.broadcast_to(jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32), gate_quat.shape),
+            jnp.broadcast_to(
+                jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32),
+                gate_quat.shape[:-1] + (3,),
+            ),
         )
         gate_lateral = jax.vmap(RaceCoreEnv._quat_apply, in_axes=(0, 0))(
             gate_quat,
-            jnp.broadcast_to(jnp.array([0.0, 1.0, 0.0], dtype=jnp.float32), gate_quat.shape),
+            jnp.broadcast_to(
+                jnp.array([0.0, 1.0, 0.0], dtype=jnp.float32),
+                gate_quat.shape[:-1] + (3,),
+            ),
         )
         hover_center = gate_pos - config.pre_gate_distance * gate_forward
 
