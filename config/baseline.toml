@@ -25,6 +25,10 @@ drone_model = "cf21B_500"
 freq = 500
 physics = "so_rpy_rotor_drag"
 
+[wandb]
+project = "drone-racing"
+mode = "online"
+
 [train]
 clip_eps = 0.2
 ent_coef = 0.005

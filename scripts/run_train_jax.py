@@ -70,6 +70,13 @@ def make_metrics_table(metrics: dict[str, float | int]) -> Table:
     return table
 
 
+def default_wandb_run_name(checkpoint_path: str) -> str:
+    checkpoint = Path(checkpoint_path)
+    if checkpoint.suffix == ".msgpack":
+        return checkpoint.parent.name or checkpoint.stem
+    return checkpoint.name
+
+
 def completed_episode_stats(
     passed: np.ndarray,
     done: np.ndarray,
@@ -299,7 +306,7 @@ def run_train(
     device: str = "auto",
     wandb_project: str = "",
     wandb_run_name: str = "",
-    wandb_mode: str = "online",
+    wandb_mode: str = "",
 ) -> None:
     checkpoint_path = str(normalize_checkpoint_path(checkpoint_path))
     init_checkpoint_path = str(normalize_checkpoint_path(init_checkpoint_path)) if init_checkpoint_path else ""
@@ -311,6 +318,12 @@ def run_train(
         prefer_checkpoint_sidecar=False,
     )
     cfg = load_config(resolved_config_path)
+    wandb_cfg = cfg.get("wandb", {})
+    wandb_project = wandb_project or str(wandb_cfg.get("project", ""))
+    wandb_mode = wandb_mode or str(wandb_cfg.get("mode", "online"))
+    wandb_run_name = wandb_run_name or str(wandb_cfg.get("run_name", "")) or default_wandb_run_name(
+        checkpoint_path
+    )
     device = select_device(device)
     print("JAX devices:", jax.devices())
     print("Using device:", device)
@@ -380,7 +393,7 @@ def run_train(
         else:
             wandb_run = wandb.init(
                 project=wandb_project,
-                name=wandb_run_name or None,
+                name=wandb_run_name,
                 mode=wandb_mode,
                 config={
                     "config_file": str(resolved_config_path),
@@ -388,6 +401,9 @@ def run_train(
                     "device": device,
                     "checkpoint_path": checkpoint_path,
                     "init_checkpoint_path": init_checkpoint_path,
+                    "wandb_project": wandb_project,
+                    "wandb_run_name": wandb_run_name,
+                    "wandb_mode": wandb_mode,
                     "train": dict(cfg.train),
                     "env_reward": dict(cfg.env.get("reward") or {}),
                     "num_envs_effective": env.num_envs,
