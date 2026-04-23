@@ -54,7 +54,7 @@ yaw_jitter = 0.15
 
 [env.reward]
 ang_vel_penalty_scale = 0.004
-completion_bonus = 0.2
+completion_bonus = 0.5
 crash_penalty = 5.0
 gate_pass_bonus = 5.0
 gate_width = 0.4
