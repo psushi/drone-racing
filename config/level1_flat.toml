@@ -27,7 +27,7 @@ physics = "so_rpy_rotor_drag"
 
 [train]
 clip_eps = 0.2
-ent_coef = 0.003
+ent_coef = 0.005
 gamma = 0.99
 lambda_ = 0.95
 lr = 0.0003
@@ -43,8 +43,7 @@ vf_coef = 0.5
 bank_path = "artifacts/low-cen-gate/reset_bank.npz"
 bank_prob = 0.0
 gate_indices = [ 0, 1, 2, 3,]
-gate_probs = [ 0.22, 0.3, 0.33, 0.15,]
-# gate_probs = [1.0, 0.0, 0.0, 0.0]
+gate_probs = [ 0.22, 0.30, 0.33, 0.15,]
 post_prev_distance_max = 0.95
 post_prev_distance_min = 0.35
 post_prev_prob = 0.7
@@ -55,21 +54,25 @@ yaw_jitter = 0.15
 
 [env.reward]
 ang_vel_penalty_scale = 0.004
-completion_bonus = 1.0
 crash_penalty = 5.0
 gate_pass_bonus = 5.0
 gate_width = 0.4
 max_angular_speed = 25.0
 max_linear_speed = 12.0
-perception_distance_scale = 1.0
-perception_weight = 0.35
 progress_scale = 30.0
+perception_weight = 0.35
+perception_distance_scale = 1.0
 safety_activation_distance = 2.5
 safety_weight = 1.5
 vel_penalty_scale = 0.01
 
 [env.track]
 randomize = false
+
+[env.track.gate_z_randomization]
+min = -0.20
+max = 0.20
+
 [[env.track.drones]]
 pos = [ -1.5, 0.75, 0.01,]
 rpy = [ 0.0, 0.0, 0.0,]
@@ -113,10 +116,6 @@ fn = "uniform"
 
 [env.randomizations.drone_rpy]
 fn = "uniform"
-
-[env.track.gate_z_randomization]
-max = 0.2
-min = -0.2
 
 [env.track.safety_limits]
 pos_limit_high = [ 2.5, 1.5, 2.0,]
