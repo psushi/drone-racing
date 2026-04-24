@@ -51,8 +51,8 @@ gate_probs = [ 0.22, 0.3, 0.33, 0.15,]
 post_prev_distance_max = 0.95
 post_prev_distance_min = 0.35
 post_prev_prob = 0.7
-post_prev_speed_max = 3.0
-post_prev_speed_min = 1.5
+post_prev_speed_max = 2.0
+post_prev_speed_min = 1.0
 pre_gate_speed = 0.0
 yaw_jitter = 0.15
 
