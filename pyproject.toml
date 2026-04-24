@@ -33,11 +33,11 @@ sim = [
     "drone-models",
     "drone-controllers",
     "crazyflow @ git+https://github.com/utiasDSL/crazyflow.git@0.1.0b0",
-    "jax >= 0.7",
+    "jax == 0.7.2",
     "warp-lang",
 ]
 # option[gpu]: simulation with gpu
-gpu = ["jax[cuda12] ; sys_platform == 'linux'"]
+gpu = ["jax[cuda12] == 0.7.2 ; sys_platform == 'linux'"]
 # option[deploy]: deploy to real drones
 deploy = [
     "cfclient",
@@ -106,7 +106,7 @@ harvest = ".pixi/envs/default/bin/python scripts/harvest_reset_bank.py"
 
 [tool.pixi.dependencies]
 openblas = ">=0.3.30,<0.4"
-python = ">=3.11.12,<3.14"
+python = ">=3.12,<3.13"
 pip = ">=25.0.1,<26"
 packaging = ">=25.0,<26"
 cmake = "*"

@@ -15,7 +15,7 @@ control_mode = "attitude"
 freq = 100
 id = "DroneRacing-v0"
 max_episode_steps = 800
-seed = "random"
+seed = 42
 sensor_range = 0.7
 
 [sim]
