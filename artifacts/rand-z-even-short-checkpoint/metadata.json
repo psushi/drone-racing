@@ -1,0 +1,39 @@
+{
+  "best_checkpoint_iteration": 1612,
+  "best_checkpoint_path": "artifacts/rand-z-even-short-checkpoint/model.msgpack",
+  "best_checkpoint_reliability": 1.0,
+  "best_metrics": {
+    "best_avg_gates_passed": 2.984375,
+    "best_completion_reliability": 1.0,
+    "best_episode_gates_mean": 1.735714316368103,
+    "best_episode_pass_rate": 1.0,
+    "best_running_mean_reward": 0.3180522661590839
+  },
+  "checkpoint_path": "/root/drone-track-wayno2/artifacts/rand-z-even-short-checkpoint/model.msgpack",
+  "completed_iterations": 2800,
+  "config_path": "/root/drone-track-wayno2/artifacts/rand-z-even-short-checkpoint/config.toml",
+  "device": "gpu",
+  "final_checkpoint_path": "artifacts/rand-z-even-short-checkpoint/model.final.msgpack",
+  "final_metrics": {
+    "actor_loss": -0.002223871648311615,
+    "avg_gates_passed": 0.5,
+    "completion_reliability": 0.0,
+    "done_rate": 0.0010172526041666667,
+    "ent_coef": 0.0005,
+    "entropy": -3.501164436340332,
+    "episode_gates_mean": 0.0,
+    "episode_pass_rate": 0.0,
+    "episodes_completed": 25,
+    "iteration": 2799,
+    "mean_reward": 0.1512017399072647,
+    "running_mean_reward": 0.29945092465994616,
+    "value_loss": 0.12265630811452866
+  },
+  "final_running_mean_reward": 0.29945092465994616,
+  "git_commit": "7dc595a18f2f098133aad129ff1a48f25f449c81",
+  "num_envs_effective": 128,
+  "saved_at_utc": "2026-04-22T14:14:51.708474+00:00",
+  "seed": 0,
+  "source_config_path": "/root/drone-track-wayno2/config/level1_flat.toml",
+  "transitions_per_iter": 24576
+}
