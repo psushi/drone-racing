@@ -57,7 +57,7 @@ pre_gate_speed = 0.0
 yaw_jitter = 0.15
 
 [env.reward]
-ang_vel_penalty_scale = 0.005
+ang_vel_penalty_scale = 0.006
 crash_penalty = 5.0
 gate_pass_bonus = 5.0
 gate_width = 0.4
