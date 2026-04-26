@@ -1,7 +1,7 @@
 """Real-world drone racing environments.
 
 This module contains the environments for controlling a single drone in a real-world
-race track. It mirrors the :mod:`~ece484_fly.envs.drone_race` module as closely as possible,
+race track. It mirrors the :mod:`~drone_racing_rl.envs.drone_race` module as closely as possible,
 but uses data from real-world observations from motion capture systems and sends actions to the
 real drones.
 """
@@ -29,8 +29,8 @@ from drone_models.transform import force2pwm
 from gymnasium import Env
 from scipy.spatial.transform import Rotation as R
 
-from ece484_fly.envs.utils import gate_passed, load_track
-from ece484_fly.utils.checks import check_drone_start_pos, check_race_track
+from drone_racing_rl.envs.utils import gate_passed, load_track
+from drone_racing_rl.utils.checks import check_drone_start_pos, check_race_track
 
 if TYPE_CHECKING:
     from ml_collections import ConfigDict
@@ -96,7 +96,7 @@ class RealRaceCoreEnv:
             drones: List of all drones in the race, including their channel and id.
             rank: Rank of the drone that is controlled by this environment.
             freq: Environment step frequency.
-            track: Track configuration (see :func:`~ece484_fly.envs.utils.load_track`).
+            track: Track configuration (see :func:`~drone_racing_rl.envs.utils.load_track`).
             randomizations: Randomization configuration.
             sensor_range: Sensor range. Determines at which distance the exact position of the
                 gates and obstacles is reveiled.
@@ -511,7 +511,7 @@ class RealDroneRaceEnv(RealRaceCoreEnv, Env):
         Observation space:
             The observation space is a dictionary containing the state of all drones in the race.
             It mimics exactly the observation space of
-            :class:`ece484_fly.envs.drone_race.DroneRaceEnv`.
+            :class:`drone_racing_rl.envs.drone_race.DroneRaceEnv`.
 
         Note:
             rclpy must be initialized before creating this environment.
@@ -519,7 +519,7 @@ class RealDroneRaceEnv(RealRaceCoreEnv, Env):
         Args:
             drones: List of all drones in the race, including their channel and id.
             freq: Environment step frequency.
-            track: Track configuration (see :func:`~ece484_fly.envs.utils.load_track`).
+            track: Track configuration (see :func:`~drone_racing_rl.envs.utils.load_track`).
             randomizations: Randomization configuration.
             sensor_range: Sensor range. Determines at which distance the exact position of the
                 gates and obstacles is reveiled.

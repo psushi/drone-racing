@@ -16,18 +16,18 @@ from flax.training.train_state import TrainState
 from rich.live import Live
 from rich.table import Table
 
-from ece484_fly.envs.jax_env import FunctionalJaxVecDroneRaceEnv
-from ece484_fly.train.actor_critic_models import ActorCritic
-from ece484_fly.train.experiment_io import (
+from drone_racing_rl.envs.jax_env import FunctionalJaxVecDroneRaceEnv
+from drone_racing_rl.train.actor_critic_models import ActorCritic
+from drone_racing_rl.train.experiment_io import (
     choose_runtime_config_path,
     default_metadata,
     normalize_checkpoint_path,
     write_experiment_sidecar,
 )
-from ece484_fly.train.obs import POLICY_OBS_DIM, flatten_obs_jax
-from ece484_fly.train.ppo import compute_gae_jax, ppo_loss
-from ece484_fly.train.utils import select_device
-from ece484_fly.utils import load_config
+from drone_racing_rl.train.obs import POLICY_OBS_DIM, flatten_obs_jax
+from drone_racing_rl.train.ppo import compute_gae_jax, ppo_loss
+from drone_racing_rl.train.utils import select_device
+from drone_racing_rl.utils import load_config
 
 
 logger = logging.getLogger(__name__)

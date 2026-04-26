@@ -15,14 +15,14 @@ import numpy as np
 from flax import serialization
 from gymnasium.wrappers.jax_to_numpy import JaxToNumpy
 
-import ece484_fly.envs  # noqa: F401
-from ece484_fly.envs.utils import gate_passed
-from ece484_fly.train import flatten_obs
-from ece484_fly.train.actor_critic_models import ActorCritic
-from ece484_fly.train.experiment_io import choose_runtime_config_path, normalize_checkpoint_path
-from ece484_fly.train.obs import POLICY_OBS_DIM
-from ece484_fly.train.utils import normalize_actions, select_device
-from ece484_fly.utils import load_config
+import drone_racing_rl.envs  # noqa: F401
+from drone_racing_rl.envs.utils import gate_passed
+from drone_racing_rl.train import flatten_obs
+from drone_racing_rl.train.actor_critic_models import ActorCritic
+from drone_racing_rl.train.experiment_io import choose_runtime_config_path, normalize_checkpoint_path
+from drone_racing_rl.train.obs import POLICY_OBS_DIM
+from drone_racing_rl.train.utils import normalize_actions, select_device
+from drone_racing_rl.utils import load_config
 
 
 logger = logging.getLogger(__name__)

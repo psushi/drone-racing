@@ -14,7 +14,7 @@ import toml
 from ml_collections import ConfigDict
 from scipy.spatial.transform import Rotation as R
 
-from ece484_fly.control.controller import Controller
+from drone_racing_rl.control.controller import Controller
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
-    from ece484_fly.envs.race_core import RaceCoreEnv
+    from drone_racing_rl.envs.race_core import RaceCoreEnv
 
 
 logger = logging.getLogger(__name__)

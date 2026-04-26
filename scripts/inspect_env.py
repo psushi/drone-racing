@@ -9,9 +9,9 @@ import fire
 import gymnasium
 import numpy as np
 
-import ece484_fly.envs  # noqa: F401
-from ece484_fly.train.utils import select_device
-from ece484_fly.utils import load_config
+import drone_racing_rl.envs  # noqa: F401
+from drone_racing_rl.train.utils import select_device
+from drone_racing_rl.utils import load_config
 
 
 logger = logging.getLogger(__name__)

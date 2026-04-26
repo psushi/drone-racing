@@ -1,7 +1,7 @@
 # Randomized Intertial Properties
 
 [controller]
-file = "controller_file_name_here.py" # Put your controller file name here. Specifying a controller as argument to scripts will override this setting. Controllers are located in `ece484_fly/control/`
+file = "controller_file_name_here.py" # Put your controller file name here. Specifying a controller as argument to scripts will override this setting. Controllers are located in `drone_racing_rl/control/`
 
 [deploy]
 ### Settings only relevant for deployment

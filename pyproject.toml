@@ -51,7 +51,7 @@ rl = ["torch == 2.8.0", "wandb"]
 find = {}
 
 [tool.setuptools.package-data]
-ece484_fly = ["envs/assets/*.xml", "envs/assets/*.png"]
+drone_racing_rl = ["envs/assets/*.xml", "envs/assets/*.png"]
 
 ########################
 # Pixi Sessions
@@ -62,7 +62,7 @@ channels = ["conda-forge"]
 platforms = ["linux-64", "osx-arm64"]
 
 [tool.pixi.pypi-dependencies]
-ece484_fly = { path = ".", editable = true }
+drone_racing_rl = { path = ".", editable = true }
 
 # feature[kilted]
 [tool.pixi.feature.kilted]

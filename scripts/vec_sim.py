@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import jax
-from ece484_fly.train.actor_critic_models import ActorCritic, Transition
+from drone_racing_rl.train.actor_critic_models import ActorCritic, Transition
 
 import logging
 from pathlib import Path
@@ -11,9 +11,9 @@ import fire
 import gymnasium
 import jax.numpy as jnp
 
-import ece484_fly.envs  # noqa: F401
-from ece484_fly.utils import load_config
-from ece484_fly.train import flatten_obs
+import drone_racing_rl.envs  # noqa: F401
+from drone_racing_rl.utils import load_config
+from drone_racing_rl.train import flatten_obs
 import numpy as np
 
 

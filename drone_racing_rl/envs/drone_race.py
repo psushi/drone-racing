@@ -10,7 +10,7 @@ from gymnasium.vector import VectorEnv
 from gymnasium.vector.utils import batch_space
 from packaging.version import Version
 
-from ece484_fly.envs.race_core import RaceCoreEnv, build_action_space, build_observation_space
+from drone_racing_rl.envs.race_core import RaceCoreEnv, build_action_space, build_observation_space
 
 if TYPE_CHECKING:
     from jax import Array

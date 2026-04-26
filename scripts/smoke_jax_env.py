@@ -9,7 +9,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ece484_fly.envs.jax_env import FunctionalJaxVecDroneRaceEnv, JaxVecDroneRaceEnv
+from drone_racing_rl.envs.jax_env import FunctionalJaxVecDroneRaceEnv, JaxVecDroneRaceEnv
 
 
 logger = logging.getLogger(__name__)

@@ -11,9 +11,9 @@ os.environ["SCIPY_ARRAY_API"] = "1"
 
 from scipy.spatial.transform import Rotation as R
 
-from ece484_fly.utils import load_config
-from ece484_fly.utils.checks import check_race_track
-from ece484_fly.utils.ros import track_poses
+from drone_racing_rl.utils import load_config
+from drone_racing_rl.utils.checks import check_race_track
+from drone_racing_rl.utils.ros import track_poses
 
 logger = logging.getLogger("rosout." + __name__)
 

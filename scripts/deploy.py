@@ -25,10 +25,10 @@ import rclpy
 from cflib.crazyflie import Localization
 from cflib.crtp.crtpstack import CRTPPacket, CRTPPort
 
-from ece484_fly.utils import load_config, load_controller
+from drone_racing_rl.utils import load_config, load_controller
 
 if TYPE_CHECKING:
-    from ece484_fly.envs.real_race_env import RealDroneRaceEnv
+    from drone_racing_rl.envs.real_race_env import RealDroneRaceEnv
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,7 @@ def main(config: str = "level1.toml", controller: str | None = None):
 
     Args:
         config: Path to the deployment configuration. Assumes the file is in `config/`.
-        controller: The name of the controller file in `ece484_fly/control/` or None. If None,
+        controller: The name of the controller file in `drone_racing_rl/control/` or None. If None,
          the controller specified in the config file is used.
     """
     rclpy.init()
@@ -140,7 +140,7 @@ def main(config: str = "level1.toml", controller: str | None = None):
         obs, info = env.reset(options=config.deploy)
         next_obs = obs  # Set next_obs to avoid errors when the loop never enters
 
-        control_path = Path(__file__).parents[1] / "ece484_fly/control"
+        control_path = Path(__file__).parents[1] / "drone_racing_rl/control"
         controller_path = control_path / config.controller.file
         controller_cls = load_controller(controller_path)
         controller = controller_cls(obs, info, config)
@@ -181,5 +181,5 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.WARNING)
     logging.getLogger("jax").setLevel(logging.ERROR)
     logger.setLevel(logging.INFO)
-    logging.getLogger("ece484_fly").setLevel(logging.INFO)
+    logging.getLogger("drone_racing_rl").setLevel(logging.INFO)
     fire.Fire(main)

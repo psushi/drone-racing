@@ -20,10 +20,10 @@ from flax.struct import dataclass
 from ml_collections import ConfigDict
 from scipy.spatial.transform import Rotation as R
 
-from ece484_fly.envs.drone_race import DroneRaceEnv, VecDroneRaceEnv
-from ece484_fly.envs.race_core import EnvData, RaceCoreEnv
-from ece484_fly.envs.utils import gate_passed
-from ece484_fly.utils import load_config
+from drone_racing_rl.envs.drone_race import DroneRaceEnv, VecDroneRaceEnv
+from drone_racing_rl.envs.race_core import EnvData, RaceCoreEnv
+from drone_racing_rl.envs.utils import gate_passed
+from drone_racing_rl.utils import load_config
 
 
 @dataclass

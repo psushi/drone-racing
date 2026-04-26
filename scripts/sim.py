@@ -8,7 +8,7 @@ Look for instructions in `README.md` and in the official documentation.
 """
 
 from __future__ import annotations
-from ece484_fly.train.obs import flatten_obs
+from drone_racing_rl.train.obs import flatten_obs
 
 import logging
 import time
@@ -21,13 +21,13 @@ import jax.numpy as jp
 import numpy as np
 from gymnasium.wrappers.jax_to_numpy import JaxToNumpy
 
-from ece484_fly.utils import load_config, load_controller
+from drone_racing_rl.utils import load_config, load_controller
 
 if TYPE_CHECKING:
     from ml_collections import ConfigDict
 
-    from ece484_fly.control.controller import Controller
-    from ece484_fly.envs.drone_race import DroneRaceEnv
+    from drone_racing_rl.control.controller import Controller
+    from drone_racing_rl.envs.drone_race import DroneRaceEnv
 
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ def simulate(
 
     Args:
         config: The path to the configuration file. Assumes the file is in `config/`.
-        controller: The name of the controller file in `ece484_fly/control/` or None. If None,
+        controller: The name of the controller file in `drone_racing_rl/control/` or None. If None,
             the controller specified in the config file is used.
         n_runs: The number of episodes.
         render: Enable/disable rendering the simulation.
@@ -65,7 +65,7 @@ def simulate(
     else:
         config.sim.pause = pause
     # Load the controller module
-    control_path = Path(__file__).parents[1] / "ece484_fly/control"
+    control_path = Path(__file__).parents[1] / "drone_racing_rl/control"
     controller_path = control_path / (controller or config.controller.file)
     controller_cls = load_controller(controller_path)  # This returns a class, not an instance
     # Create the racing environment
@@ -146,6 +146,6 @@ def log_episode_stats(obs: dict, info: dict, config: ConfigDict, curr_time: floa
 
 if __name__ == "__main__":
     logging.basicConfig()
-    logging.getLogger("ece484_fly").setLevel(logging.INFO)
+    logging.getLogger("drone_racing_rl").setLevel(logging.INFO)
     logger.setLevel(logging.INFO)
     fire.Fire(simulate, serialize=lambda _: None)

@@ -1,5 +1,5 @@
 import flax
-from ece484_fly.train.actor_critic_models import ppo_loss
+from drone_racing_rl.train.actor_critic_models import ppo_loss
 from sympy.simplify.fu import L
 import jax
 import optax

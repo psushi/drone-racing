@@ -7,7 +7,7 @@ import math
 import numpy as np
 from numpy.typing import NDArray
 
-from ece484_fly.control.controller import Controller
+from drone_racing_rl.control.controller import Controller
 
 
 class AltitudeBounceController(Controller):
