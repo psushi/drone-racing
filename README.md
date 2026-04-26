@@ -1,6 +1,7 @@
 # Drone Racing RL
 
-Train RL policies for quadrotor drone racing.
+Train RL policies for quadrotor drone racing. Using the excellent [Crazyflow](https://github.com/utiasDSL/crazyflow) simulator.
+
 - End to end vectorized JAX training pipeline. (Training and Simulation)
 - Converges in ~500 iterations on a single 5090 GPU in ~1 min.(~230K steps/s). 
 
@@ -48,4 +49,3 @@ pixi run watch --checkpoint_path baseline
 pixi run debug --checkpoint_path baseline
 ```
 
-This project builds on the excellent [Crazyflow](https://github.com/utiasDSL/crazyflow) simulator.
