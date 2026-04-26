@@ -16,14 +16,22 @@ JAX PPO project for autonomous drone racing in simulation, with tools for traini
 Requirements:
 
 - [Pixi](https://pixi.sh)
-- Linux for GPU training
-- macOS Apple Silicon for CPU simulation and debugging
+- Linux and macOS are both supported
+- if a CUDA-capable GPU is available, training will detect it and use it automatically
+- macOS works well for CPU simulation and debugging
 
 Install:
 
 ```bash
 pixi install -e default
 ```
+
+Setup for macOS users:
+
+- develop and inspect policies locally on macOS
+- train on a remote Linux machine with a CUDA GPU
+- use the same repo and configs on both machines, then pull checkpoints back to macOS for evaluation
+- Pixi takes care of linux/macOS differences
 
 ## Train
 
