@@ -1,0 +1,16 @@
+- Removing safety weight makes the model learn much faster, but it makes the entropy part of loss too dominant, so entropy becomes too high and the model collapses.
+- Runs are deterministic with the same config/seed. Differences are real config effects, not RNG noise.
+- Best training setup so far: rand-z-even-short-checkpoint. Random z worked well. Gate yaw randomization made training harder and likely needs more iterations.
+- Explicit ent_anneal_iters/min_ent_coef override made behavior worse than the old implicit schedule tied to num_iterations. Reverted to the old behavior.
+- Late-run collapse is real PPO policy drift, not randomness. Best checkpoint must be selected by completion_reliability, not final iteration.
+- Trainer now saves checkpoint_path as best-by-completion_reliability and also saves model.final.msgpack for the last iteration.
+- Completion bonus = 5.0 caused entropy to drop too early and reduced exploration. Completion bonus = 1.0 was still too strong. Not useful in current setup.
+- Safety ablations:
+- safety = 1.5: slower learning, more stable.
+- safety = 0.5: still reached high reliability quickly, but later drifted.
+- safety = 0.0: fastest to high reliability, but unstable; policy drifts out of good behavior.
+- Lowering ent_coef with safety = 0.0 helped only slightly. Entropy control is still the main issue.
+- Current strong hypothesis: we need the good entropy shape regardless of reward scale. Best runs have entropy slightly high / rising briefly, then gradually dropping.
+- Completion reliability is the main metric for policy quality. avg_gates_passed can be misleading because one rollout contains many resets.
+- Random z uses gate-relative resets correctly: reset anchors move with the randomized gate height.
+- Current JAX path now supports per-reset gate z randomization and gate yaw randomization in a shared way across train/watch/harvest.

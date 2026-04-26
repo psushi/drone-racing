@@ -11,6 +11,5 @@ __pycache__/
 # Training dashboards and local notes
 wandb/
 ideas.txt
-experiments.txt
 tea_debug.log
 .DS_Store
