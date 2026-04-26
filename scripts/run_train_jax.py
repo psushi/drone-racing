@@ -328,7 +328,7 @@ def run_train(
         seed = int(cfg_seed)
     wandb_cfg = cfg.get("wandb", {})
     wandb_project = wandb_project or str(wandb_cfg.get("project", ""))
-    wandb_mode = wandb_mode or str(wandb_cfg.get("mode", "online"))
+    wandb_mode = wandb_mode or str(wandb_cfg.get("mode", "disabled"))
     wandb_run_name = wandb_run_name or str(wandb_cfg.get("run_name", "")) or default_wandb_run_name(
         checkpoint_path
     )
