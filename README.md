@@ -1,6 +1,8 @@
 # Drone Racing RL
 
-JAX PPO project for autonomous drone racing in simulation, with tools for training, evaluation, controller testing, and deployment-oriented experiments.
+Train RL policies for quadrotor drone racing.
+- End to end vectorized JAX training pipeline. (Training and Simulation)
+- Converges in ~500 iterations on a single 5090 GPU in ~1 min.(~230K steps/s). 
 
 ## What is here
 
@@ -26,11 +28,11 @@ Install:
 pixi install -e default
 ```
 
-Setup for macOS users:
+Recommended setup for gpu-poors:
 
-- develop and inspect policies locally on macOS
+- develop and inspect policies locally on macOS/Linux
 - train on a remote Linux machine with a CUDA GPU
-- use the same repo and configs on both machines, then pull checkpoints back to macOS for evaluation
+- use the same repo and configs on both machines, then pull checkpoints back for evaluation
 - Pixi takes care of linux/macOS differences
 
 ## Train
@@ -45,19 +47,3 @@ pixi run train --config baseline.toml --checkpoint_path baseline
 pixi run watch --checkpoint_path baseline
 pixi run debug --checkpoint_path baseline
 ```
-
-## Project focus
-
-- vectorized drone racing environment
-- PPO training in JAX/Flax
-- reward shaping and reset curriculum experiments
-- policy evaluation and deployment-minded controller interfaces
-
-## Stack
-
-- JAX
-- Flax
-- Optax
-- Distrax
-- Crazyflow
-- Pixi
