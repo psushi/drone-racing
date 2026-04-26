@@ -1,4 +1,4 @@
-"""Simulate the competition as in the IROS 2022 Safe Robot Learning competition.
+"""Simulate the drone racing environment.
 
 Run as:
 

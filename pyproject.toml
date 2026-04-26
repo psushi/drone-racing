@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0.0", "wheel", "numpy>=2.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ece484_fly"
+name = "drone-racing-rl"
 version = "0.0.1"
-description = "ECE484 Quadrotor Project"
+description = "JAX PPO and simulation stack for autonomous drone racing"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
@@ -59,7 +59,7 @@ ece484_fly = ["envs/assets/*.xml", "envs/assets/*.png"]
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["linux-64"]
+platforms = ["linux-64", "osx-arm64"]
 
 [tool.pixi.pypi-dependencies]
 ece484_fly = { path = ".", editable = true }

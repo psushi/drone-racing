@@ -1,8 +1,8 @@
 """Base class for controller implementations.
 
-Your task is to implement your own controller. This class must be the parent class of your
-implementation. You have to use the same function signatures as defined by the base class. Apart
-from that, you are free to add any additional methods, attributes, or classes to your controller.
+This class must be the parent class of any controller implementation. Use the same function
+signatures as defined here. Apart from that, you are free to add any additional methods,
+attributes, or helper classes to your controller.
 
 As an example, you could load the weights of a neural network in the constructor and use it to
 compute the control commands in the :meth:`compute_control <.Controller.compute_control>`

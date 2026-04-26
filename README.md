@@ -1,355 +1,120 @@
-[![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/Pzw1OSwB)
-# ECE484 Drone Track
+# Drone Racing RL
 <p align="center">
-  <img width="460" height="300" src="quadrotor-sketch.png">
+  <img width="460" height="300" src="quadrotor-sketch.png" alt="Quadrotor sketch">
 </p>
 
-## Introduction
+Physics-based autonomous drone racing project built around a JAX PPO training loop, a functional vectorized environment, and deployment-minded reward/reset design for Crazyflie-scale vehicles.
 
-In this project, you will develop safe and robust control systems for autonomous drone racing. There are two phases:
+## Highlights
 
-1. **Simulation**: Develop and test controllers in a physics-based simulation environment.
-2. **Deployment**: Deploy and further optimize controllers on CrazyFlie hardware in the lab.
+- JAX-native PPO trainer for quadrotor racing
+- functional vectorized environment for fast rollout collection
+- reward debugging and checkpoint inspection tools that share the same config path as training
+- reset curriculum plus harvested reset-bank workflows
+- simulation and controller interfaces that can be adapted toward real hardware
 
-You are required to achieve safe autonomous flight in both phases. Teams that deploy successfully will be allowed to participate in a competition, in which lap times will be compared on various tracks.
+## Repo Layout
 
-The drone must navigate through a series of gates while avoiding obstacles. The track layout, gate positions, and obstacle positions are provided to your controller via observations.
-
-**Join the course Slack for announcements, Q&A, and team coordination**: [ECE484 Drones Slack](https://join.slack.com/t/ece484drones/shared_invite/zt-3ubfnhimf-FQl2mhduGHjcZ~vIrxXbwQ)
+```text
+.
+├── config/                 # training and evaluation configs
+├── ece484_fly/
+│   ├── control/            # controller interfaces and examples
+│   ├── envs/               # racing environments and JAX wrappers
+│   ├── train/              # PPO, obs encoding, experiment I/O
+│   └── utils/              # config loading and helpers
+├── scripts/
+│   ├── run_train_jax.py
+│   ├── watch_policy.py
+│   ├── debug_reward_attitude.py
+│   ├── harvest_reset_bank.py
+│   ├── sim.py
+│   └── vec_sim.py
+└── tools/
+```
 
 ## Setup
 
-**Prerequisites**:
-- **Simulation**: Linux (Ubuntu recommended) or macOS (Apple Silicon), Python 3.11+
-- **Hardware deployment**: Linux (Ubuntu recommended), Python 3.11+
+Requirements:
 
-1. Clone the repository:
-   ```
-   git clone <repo-url>
-   cd ece484-fly
-   ```
-2. Install [Pixi](https://pixi.sh):
-   ```
-   curl -fsSL https://pixi.sh/install.sh | sh
-   ```
-3. Activate the simulation environment:
-   ```
-   pixi install -e default
-   ```
+- Linux for GPU-backed training
+- macOS Apple Silicon works for CPU simulation/debugging
+- [Pixi](https://pixi.sh)
 
-> **macOS note**: Simulation is supported on macOS via CPU execution. GPU acceleration and hardware deployment workflows are Linux-only.
-
-## JAX Training
-
-This branch keeps one primary RL training path:
-
-- `scripts/run_train_jax.py`: main JAX PPO trainer
-- `ece484_fly/envs/jax_env.py`: functional JAX environment wrapper
-- `scripts/watch_policy.py`: render a saved checkpoint
-- `scripts/debug_reward_attitude.py`: inspect reward terms for a saved checkpoint
-
-Install the default environment once:
+Install the environment:
 
 ```bash
 pixi install -e default
 ```
 
-Run JAX training:
+## Train
+
+Run the baseline config:
 
 ```bash
-pixi run train
+pixi run train --config baseline.toml --checkpoint_path baseline
 ```
 
-The trainer reads a TOML config and writes checkpoints to:
+This writes:
 
 ```text
-artifacts/policy_jax/model.msgpack
+artifacts/baseline/model.msgpack
+artifacts/baseline/model.final.msgpack
+artifacts/baseline/config.toml
+artifacts/baseline/metadata.json
 ```
 
-It also snapshots the fully resolved run config and metadata into the same directory:
+## Inspect a Policy
 
-```text
-artifacts/policy_jax/config.toml
-artifacts/policy_jax/metadata.json
-```
-
-This is the recommended experiment loop. Train, watch, and debug should all point at the same
-checkpoint so they use the same sidecar config automatically.
-
-There is also an easier curriculum config at `config/level1_flat.toml` with:
-
-- all gates at the same height
-- larger gate spacing
-- a gentler path for early PPO experiments
-
-Use it with:
+Render a saved checkpoint:
 
 ```bash
-pixi run train --config level1_flat.toml
-pixi run watch --config level1_flat.toml
-pixi run debug --config level1_flat.toml
+pixi run watch --checkpoint_path baseline
 ```
 
-Render the latest JAX checkpoint:
+Print reward terms and motion diagnostics:
 
 ```bash
-pixi run watch
+pixi run debug --checkpoint_path baseline
 ```
 
-If `artifacts/policy_jax.toml` exists, the watcher will use that run-local config by default.
-You can still override it explicitly with `--config`.
-
-Inspect reward terms while stepping the learned policy:
+Harvest a reset bank from a trained policy:
 
 ```bash
-pixi run debug
+pixi run harvest --checkpoint_path baseline
 ```
 
-The debug script follows the same rule and prefers the checkpoint sidecar config when present.
+## Configs
 
-Optional W&B logging is supported from the same trainer. After `wandb login`, run:
+Useful configs in this repo:
+
+- `config/baseline.toml`: reproduced baseline training config
+- `config/level1_flat.toml`: easier flat-track setup for early training
+- `config/l1.toml` to `config/l8.toml`: curriculum-style track ladder
+
+Typical curriculum flow:
 
 ```bash
-pixi run train --config level1_flat.toml --wandb_project drone-track-jax --wandb_run_name flat-128env
+pixi run train --config l1.toml --checkpoint_path l1
+pixi run train --config l2.toml --checkpoint_path l2 --init_checkpoint_path l1
+pixi run train --config l3.toml --checkpoint_path l3 --init_checkpoint_path l2
 ```
 
-The live terminal table still runs locally; W&B just mirrors the key metrics and transition counts.
+## Notes
 
-Recommended workflow for reproducible experiments:
+- Run outputs and checkpoints are intentionally not tracked in this public branch.
+- The package import path remains `ece484_fly` for compatibility with the original codebase history.
+- Some hardware deployment utilities are still present, but the public focus of this repo is the simulation, training, and policy-evaluation stack.
 
-```bash
-pixi run train --config level1_flat.toml --checkpoint_path flat_baseline
-pixi run watch --checkpoint_path flat_baseline
-pixi run debug --checkpoint_path flat_baseline
-```
+## Tech Stack
 
-The shorthand `flat_baseline` resolves to:
+- JAX
+- Flax
+- Distrax
+- Optax
+- Crazyflow
+- Pixi
 
-```text
-artifacts/flat_baseline/model.msgpack
-artifacts/flat_baseline/config.toml
-artifacts/flat_baseline/metadata.json
-```
+## Attribution
 
-All three commands will agree on the same saved config unless you explicitly override it.
-The metadata file also stores final and best training metrics for quick experiment comparison,
-including:
-
-- `avg_gates_passed`
-- `episode_gates_mean`
-- `episode_pass_rate`
-- `running_mean_reward`
-- `done_rate`
-- `actor_loss`
-- `value_loss`
-- `entropy`
-- `ent_coef`
-
-The default training config is a moderate baseline:
-
-- `num_envs = 32`
-- `num_steps = 64`
-- `num_minibatches = 8`
-- `num_iterations = 1500`
-
-If you want to override the config or device from the CLI:
-
-```bash
-pixi run train --config level1.toml --device auto
-pixi run watch --checkpoint_path artifacts/policy_jax.msgpack
-pixi run debug --checkpoint_path artifacts/policy_jax.msgpack
-```
-
-## Project Structure
-
-```
-ece484-fly/
-├── ece484_fly/
-│   ├── control/          # Your controllers go here
-│   │   └── controller.py # Base Controller class (must inherit from this)
-│   ├── envs/             # Simulation environments and JAX wrappers
-│   └── utils/            # Utility functions
-├── scripts/
-│   ├── sim.py            # Run simulation
-│   ├── run_train_jax.py  # Main JAX PPO trainer
-│   ├── watch_policy.py   # Render a saved policy checkpoint
-│   ├── debug_reward_attitude.py # Reward/debug viewer for a saved checkpoint
-│   └── deploy.py         # Deploy to hardware
-└── config/
-    └── level1.toml       # Track and environment configuration
-```
-
-## Writing a Controller
-
-Create a new Python file in `ece484_fly/control/` that inherits from the `Controller` base class. You must implement the `compute_control` method. Only define **one** controller class per file.
-
-```python
-import numpy as np
-from numpy.typing import NDArray
-from ece484_fly.control.controller import Controller
-
-class MyController(Controller):
-    def __init__(self, obs, info, config):
-        super().__init__(obs, info, config)
-        # Initialize your controller here (pre-plan trajectories, load models, etc.)
-
-    def compute_control(self, obs, info=None) -> NDArray[np.floating]:
-        # Your control logic here
-        # Return a state command or attitude command (see below)
-        ...
-```
-
-### Observation Space
-
-Your controller receives an `obs` dictionary at each time step with the following fields:
-
-| Key | Shape | Description |
-|-----|-------|-------------|
-| `pos` | `(3,)` | Drone position `[x, y, z]` in meters |
-| `quat` | `(4,)` | Drone orientation as quaternion `[qx, qy, qz, qw]` |
-| `vel` | `(3,)` | Drone velocity `[vx, vy, vz]` in m/s |
-| `ang_vel` | `(3,)` | Drone angular velocity `[wx, wy, wz]` in rad/s |
-| `target_gate` | `int` | Index of the next gate to pass (`-1` if all gates passed) |
-| `gates_pos` | `(n_gates, 3)` | Positions of all gates |
-| `gates_quat` | `(n_gates, 4)` | Orientations of all gates as quaternions |
-| `gates_visited` | `(n_gates,)` | Boolean flags for which gates have been passed |
-| `obstacles_pos` | `(n_obstacles, 3)` | Positions of all obstacles |
-| `obstacles_visited` | `(n_obstacles,)` | Boolean flags for obstacles detected |
-
-> **Note**: Gate and obstacle positions report their nominal (config) positions until the drone is within `sensor_range` (default 0.7m), at which point the exact position is provided. In hardware, state estimation (position, velocity, orientation) is provided by an external motion capture system.
-
-### Action Space
-
-Your `compute_control` method must return one of:
-
-- **State command** (13 values): `[x, y, z, vx, vy, vz, ax, ay, az, yaw, rrate, prate, yrate]` — desired position, velocity, acceleration, and yaw/angular rates in absolute coordinates.
-- **Attitude command** (4 values): `[thrust, roll, pitch, yaw]` — direct attitude control.
-
-The control mode is set in the config file (`control_mode = "state"` or `"attitude"`).
-
-### Callback Methods (Optional)
-
-- `step_callback(action, obs, reward, terminated, truncated, info)` — Called after each step. Use for learning, adaptation, or to signal episode termination.
-- `episode_callback()` — Called after each episode. Use for logging, training, or resetting state.
-
-## Configuration
-
-The track configuration is defined in `config/level1.toml`. Key settings:
-
-- **Gates**: Defined by position `[x, y, z]` and rotation `[roll, pitch, yaw]`. Gates are 0.72m wide (frame) with a 0.4m opening. Tall gates are at 1.195m, short gates at 0.695m.
-- **Obstacles**: Cylinders, 0.03m diameter, ~1.52m tall.
-- **Control mode**: `"state"` or `"attitude"` (set in `[env]` section).
-- **Environment frequency**: 100 Hz (how often `compute_control` is called).
-- **Simulation frequency**: 500 Hz (physics update rate).
-- **Disturbances and randomizations**: Configured in `[env.disturbances]` and `[env.randomizations]` sections. These add noise to actions, dynamics, drone mass/inertia, and starting position to encourage robust controllers.
-
-## Simulation
-
-Activate the environment and run your controller:
-
-```bash
-pixi run -e default sim --config level1.toml --controller my_controller.py --n_runs 1
-```
-
-The controller file is loaded from `ece484_fly/control/`. You can also set the controller in `level1.toml` under `[controller] file`.
-
-
-Notes:
-- `--pause=True` keeps the MuJoCo viewer open and interactive until you press `Ctrl+C`.
-- If you pass booleans via CLI, use `True`/`False` (capitalized) to avoid type parsing issues.
-
-## Hardware Deployment
-
-### Environment Setup
-
-Activate the deployment environment:
-```bash
-pixi shell -e deploy
-```
-
-### Motion Capture Configuration
-
-The following changes must be made in `ros_ws`:
-
-1. In `ros_ws/src/motion_capture_tracking/motion_capture_tracking/config/cfg.yaml`, set `type` to `vrpn`, `hostname` to `192.168.1.114`, and `port` to `3883`.
-2. In `ros_ws/src/motion_capture_tracking/motion_capture_tracking/launch/node.launch`, set `motion_capture_type` and `motion_capture_hostname` accordingly.
-3. In `ros_ws/src/motion_capture_tracking/motion_capture_tracking/src/motion_capture_tracking_node.cpp`, replace `vicon` with `vrpn` on Line 14.
-
-Re-activate the deployment environment, then run `source install/setup.bash` in the ROS workspace if needed.
-
-### USB Setup for CrazyRadio
-
-Run the following once to configure USB permissions:
-
-```bash
-cat <<EOF | sudo tee /etc/udev/rules.d/99-bitcraze.rules > /dev/null
-# Crazyradio (normal operation)
-SUBSYSTEM=="usb", ATTRS{idVendor}=="1915", ATTRS{idProduct}=="7777", MODE="0664", GROUP="plugdev"
-# Bootloader
-SUBSYSTEM=="usb", ATTRS{idVendor}=="1915", ATTRS{idProduct}=="0101", MODE="0664", GROUP="plugdev"
-# Crazyflie (over USB)
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", MODE="0664", GROUP="plugdev"
-EOF
-
-sudo groupadd plugdev
-sudo usermod -a -G plugdev $USER
-
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-```
-
-### Running on Hardware
-
-Open three separate terminals:
-
-```bash
-# Terminal 1: Motion capture tracking
-ros2 launch motion_capture_tracking launch.py
-
-# Terminal 2: State estimator
-python3 -m drone_estimators.ros_nodes.ros2_node --drone_name <drone_name (eg. cf1)>
-
-# Terminal 3: Deploy your controller
-python3 scripts/deploy.py --config level1.toml --controller my_controller.py
-```
-
-## Must Have
-
-Implement one or both of the following safety features in your stack. 
-
-**Emergency Kill Switch**: Implement a background listener (e.g., keyboard or gamepad button) that terminates the flight when triggered. 
-
-**Manual Takeover**: Implement a mode switch that allows an operator to take over control mid-flight via a gamepad or joystick. Pressing the button again should return to autonomous mode. The switch must be seamless — no abrupt jumps in commanded state.
-
-## Resources
-
-You are free to implement any control strategy. Here are some references to get started:
-
-**Fundamentals**
-- [Aerial Robotics — Vijay Kumar (Coursera)](https://www.coursera.org/learn/robotics-flight) — Video lectures on quadrotor dynamics, PID, and trajectory planning.
-- [CrazyFlie Controller Documentation](https://www.bitcraze.io/documentation/repository/crazyflie-firmware/master/functional-areas/sensor-to-control/controllers/) — The cascaded PID architecture running on your hardware.
-
-**Trajectory Planning**
-- [Minimum Snap Trajectory Generation — Mellinger & Kumar (ICRA 2011)](https://ieeexplore.ieee.org/document/5980409) — Polynomial trajectory generation through waypoints.
-- [Polynomial Trajectories in Dense Environments — Richter, Bry, Roy](https://arxiv.org/abs/1603.04622) — Minimum snap with corridor constraints for obstacle avoidance.
-
-**Path Planning**
-- [Planning Algorithms — LaValle](http://planning.cs.uiuc.edu/) — Free textbook. Chapters 5 (sampling-based) and 14 (differential constraints) cover A*, RRT, PRM.
-- [Safe Flight Corridors — Liu et al.](https://arxiv.org/abs/1703.07640) — A* search to safe corridors to minimum snap optimization for quadrotors.
-
-**Model Predictive Control**
-- [Model Predictive Contouring Control for Drone Racing — Foehn et al.](https://arxiv.org/abs/2108.13205) — Time-optimal MPC for racing through gates.
-- [acados Documentation](https://docs.acados.org/) — Fast embedded optimal control solver. See `tools/setup_acados.sh` in this repo.
-
-**Reinforcement Learning**
-- [Champion-Level Drone Racing Using Deep RL — Kaufmann et al. (Nature 2023)](https://arxiv.org/abs/2306.16772) — RL that beat human world champions at drone racing, with sim-to-real transfer.
-- [gym-pybullet-drones](https://github.com/utiasDSL/gym-pybullet-drones) — Open-source Gymnasium environment for CrazyFlie-scale RL training.
-
-> **Note on RL**: Training policies is non-trivial, requires significant compute, and can be difficult to transfer to real hardware. If you choose this approach, test sim-to-real transfer early.
-
-## Hardware Details
-
-- **Drone**: CrazyFlie 2.1B with 350mAh battery (`cf21B_500`)
-- **Onboard sensors**: IMU only (no cameras)
-- **State estimation**: Provided externally via motion capture system (position, orientation, velocity)
-- **Communication**: CrazyRadio 2.0 USB dongle
+This project builds on public simulation and control tooling, especially Crazyflow and the JAX/Flax ecosystem. The racing environment logic, JAX training path, reward shaping, reset curriculum, and experiment tooling in this repo were developed as part of this project codebase.

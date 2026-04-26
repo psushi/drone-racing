@@ -118,7 +118,7 @@ def main(config: str = "level1.toml", controller: str | None = None):
     """Deployment script to run the controller on the real drone.
 
     Args:
-        config: Path to the competition configuration. Assumes the file is in `config/`.
+        config: Path to the deployment configuration. Assumes the file is in `config/`.
         controller: The name of the controller file in `ece484_fly/control/` or None. If None,
          the controller specified in the config file is used.
     """
