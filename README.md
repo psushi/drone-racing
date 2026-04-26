@@ -47,3 +47,5 @@ pixi run train --config baseline.toml --checkpoint_path baseline
 pixi run watch --checkpoint_path baseline
 pixi run debug --checkpoint_path baseline
 ```
+
+This project builds on the excellent [Crazyflow](https://github.com/utiasDSL/crazyflow) simulator.
