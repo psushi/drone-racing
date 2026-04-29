@@ -1,3 +1,6 @@
+- Training dynamics is determined by the the balance between entropy and reward, there must be a way to sweep diffferent reward scaling to find the sweet spot.
+  - Say we choose reward scaling so that the entropy is a nice cosine wave.
+  - Make some assumptions about the ideal shape of the value loss and actor loss.
 - Removing safety weight makes the model learn much faster, but it makes the entropy part of loss too dominant, so entropy becomes too high and the model collapses.
 - Runs are deterministic with the same config/seed. Differences are real config effects, not RNG noise.
 - Best training setup so far: rand-z-even-short-checkpoint. Random z worked well. Gate yaw randomization made training harder and likely needs more iterations.

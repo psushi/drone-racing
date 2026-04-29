@@ -5,6 +5,13 @@ Train RL policies for quadrotor drone racing. Using the excellent [Crazyflow](ht
 - End to end vectorized JAX training pipeline. (Training and Simulation)
 - Converges in ~500 iterations on a single 5090 GPU in ~1 min.(~230K steps/s). 
 
+<p align="center">
+  <video src="watch.mp4" controls muted playsinline width="720"></video>
+</p>
+<p align="center">
+  <a href="watch.mp4">Demo video</a>
+</p>
+
 ## What is here
 
 - `drone_racing_rl/`: environments, controllers, training code, and utilities
@@ -48,4 +55,3 @@ pixi run train --config baseline.toml --checkpoint_path baseline
 pixi run watch --checkpoint_path baseline
 pixi run debug --checkpoint_path baseline
 ```
-
