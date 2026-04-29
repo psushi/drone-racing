@@ -6,10 +6,10 @@ Train RL policies for quadrotor drone racing. Using the excellent [Crazyflow](ht
 - Converges in ~500 iterations on a single 5090 GPU in ~1 min.(~230K steps/s). 
 
 <p align="center">
-  <video src="watch.mp4" controls muted playsinline width="720"></video>
+  <video src="https://github.com/user-attachments/assets/b5d1c92e-964c-4558-9c94-59b429a9ace3" controls muted playsinline width="720"></video>
 </p>
 <p align="center">
-  <a href="watch.mp4">Demo video</a>
+  <a href="https://github.com/user-attachments/assets/b5d1c92e-964c-4558-9c94-59b429a9ace3">Demo video</a>
 </p>
 
 ## What is here
